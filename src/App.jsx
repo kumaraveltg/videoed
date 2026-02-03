@@ -30,6 +30,8 @@ function App() {
 
   const [selectedAction, setSelectedAction] = useState(null);
   const [width, setWidth] = useState(200);
+  const [videoDuration, setVideoDuration] = useState(0);  
+  const [isLoadingFrames, setIsLoadingFrames] = useState(false);
    
 
   // Helper: set selected action by id (keeps selectedAction as an object)
@@ -44,14 +46,18 @@ function App() {
 
   // ------------------- TIMELINE STATE -------------------
   const [tracks, setTracks] = useState([
+    { id: "video-main", type: "video", actions: [] }, 
     { id: "track-text", type: "text", actions: [] },
-    { id: "track-image", type: "image", actions: [] },
+    { id: "track-audio", type: "audio", actions: [] },
+    { id: "track-secondvideo", type: "Second video", actions: [] }, 
+    { id: "track-trim", type: "trim", actions: [] },
   ]);
 
   // ------------------- FILE HANDLERS -------------------
   const handleFileSelect = (selectedFile) => {
     setFile(selectedFile);
     setVideoSrc(URL.createObjectURL(selectedFile));
+     handleOnVideoUpload(selectedFile);
   };
 
   const handleFileUploaded = (data) => {
@@ -101,12 +107,13 @@ function App() {
     }
   };
 
-  // ------------------- ACTION HANDLERS -------------------
+  // ------------------- TEXT ACTION HANDLERS for Timelinekonva -------------------
   const handleAddAction = (trackId, startTime) => {
     const newAction = {
       id: Date.now().toString(),
       start: 0,
       end: startTime + 3,
+      type: "text",
       text: "New Text",
       fontSize: 24,
       color: "white",
@@ -143,6 +150,17 @@ function App() {
     );
     setSelectedAction((prev) => (prev && prev.id === actionId ? { ...prev, ...updates } : prev));
   };
+
+      const handleDeleteAction = (trackId, actionId) => {
+        setTracks((prevTracks) =>
+          prevTracks.map((t) => {
+            if (t.id === trackId) {
+              return { ...t, actions: t.actions.filter((a) => a.id !== actionId) };
+            }
+            return t;
+          })
+        );
+      };
 
   // Repair any existing actions with invalid numeric fields (runs when `tracks` changes)
   useEffect(() => {
@@ -257,6 +275,66 @@ function App() {
     }
   };
 
+  //----------------- video upload frames extraction -----------------
+  async function extractVideoFrames(file, interval = 1) {
+  const video = document.createElement("video");
+  video.src = URL.createObjectURL(file);
+  video.muted = true;
+
+  await video.play();
+  video.pause();
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const frames = [];
+
+  for (let t = 0; t < video.duration; t += interval) {
+    video.currentTime = t;
+
+    await new Promise(res => (video.onseeked = res));
+
+    ctx.drawImage(video, 0, 0);
+    frames.push(canvas.toDataURL("image/jpeg"));
+  }
+
+  return {
+    duration: video.duration,
+    frames
+  };
+}
+
+const handleOnVideoUpload = async (file) => {
+  setIsLoadingFrames(true);
+  try {
+  const { duration, frames } = await extractVideoFrames(file, 1);
+
+  setTracks(prev =>
+    prev.map(track =>
+      track.type === "video"
+        ? {
+            ...track,
+            actions: [{
+              id: "video-main",
+              start: 0,
+              end: duration,
+              frames
+            }]
+          }
+        : track
+    )
+  );
+
+  setVideoDuration(duration);
+  
+} finally { setIsLoadingFrames(false);
+}
+ };
+ 
+
   // ------------------- RENDER -------------------
   return (
     <div style={{ padding: 20 }}>
@@ -272,13 +350,31 @@ function App() {
           height: videoHeightPx,
           marginTop: 10,
         }}
-      >
+      > {isLoadingFrames && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                background: "rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1000,
+              }}
+            >
+              <Loader />
+            </div>
+          )}
         {!splitMode && ( 
           <VideoPlayer
             key={activeVideoSrc}
             src={activeVideoSrc}
-            width={videoWidthPx}
-            height={videoHeightPx}            
+            width={duration }
+            //height={videoHeightPx}            
+            height={(videoHeightPx/videoWidthPx)*duration}
             controls
             preload="auto"
             onLoadedMetadata={(e) => {
@@ -298,7 +394,7 @@ function App() {
             width: videoWidthPx || 800,
             height: videoHeightPx,
             margin: "0 auto",
-            pointerEvents: "auto",
+            pointerEvents: selectedAction ? "auto" : "none",
           }}
         >
           {videoWidthPx > 0 && videoHeightPx > 0 && (
@@ -328,6 +424,8 @@ function App() {
           onChange={handleTimelineChange}
           onAddAction={handleAddAction}
           onSelectAction={setSelectedAction}
+          onDeleteAction={handleDeleteAction}
+          onVideoUpload={handleOnVideoUpload}
         /> 
 
         {/* Edit selected text */}
@@ -367,17 +465,7 @@ function App() {
         </div>
       )}
     
-
-<div
-  style={{
-    width,
-    resize: "horizontal",
-    overflow: "hidden",
-    border: "1px solid black",
-  }}
->
-  Drag the corner to resize me
-</div>
+ 
       <hr />
       <h3>🧩 Merge Videos</h3>
       <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} />
