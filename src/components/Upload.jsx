@@ -1,6 +1,7 @@
 import { FaUpload } from "react-icons/fa6";
 
-function Upload({ onFileSelect, label }) {
+function Upload({ onFileSelect, label,onFileUploaded }) {
+
   const handleFileChange = async(file) => {
     // Future enhancement: handle file upload progress or validation here
     if  (!file) return;
@@ -14,11 +15,15 @@ function Upload({ onFileSelect, label }) {
       if(!response.ok) { 
         throw new Error("File upload failed");
       }
+      const data = await response.json();
+      console.log("UPLOAD RESPONSE:", data);
       if (onFileSelect) {
         onFileSelect(file);
       }
-      alert("File uploaded successfully");
-      
+      if (onFileUploaded) {
+      onFileUploaded(data);
+    }
+      alert("File uploaded successfully"); 
  
     } catch (error) {
       console.error("File selection error:", error);

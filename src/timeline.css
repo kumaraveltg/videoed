@@ -1,0 +1,17 @@
+.timeline-editor {
+  background: #1e1e1e;
+  color: #fff;
+}
+
+.timeline-editor-action {
+  background: #3b82f6;
+  border-radius: 4px;
+}
+
+.timeline-editor-track {
+  border-bottom: 1px solid #333;
+}
+.timeline-editor-track-header {
+  background: #2d2d2d;
+  border-right: 1px solid #333;
+}
