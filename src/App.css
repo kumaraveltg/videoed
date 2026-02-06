@@ -1,42 +1,53 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+.editor-root {
+  width: 100%;
+  overflow: hidden;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.video-area {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.timeline-area {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+.timeline-ruler {
+  position: relative;
+  display: block;
+  align-items: center;
+  height: 40px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #555;
+  user-select: none;
 }
-
-.card {
-  padding: 2em;
+.timeline-ruler .tick {
+  position: relative;
+  height: 100%;
+  border-left: 1px solid #555;
 }
-
-.read-the-docs {
-  color: #888;
+.timeline-ruler .tick-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: #555;
+  margin-top: 2px;
 }
+.timeline-ruler .tick.major {
+  height: 100%;
+  border-left: 2px solid #555;
+}
+.timeline-ruler .tick.major .tick-label {
+  font-weight: bold;
+}
+.timeline-ruler .tick.minor {
+  height: 50%;
+  border-left: 1px solid #555;
+}
+.timeline-ruler .tick.minor .tick-label {
+  font-size: 8px;
+} 
