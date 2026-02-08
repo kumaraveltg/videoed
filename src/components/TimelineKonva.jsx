@@ -1,4 +1,4 @@
-// TimelineKonva.jsx
+// TimelineKonva.jsx - IMPROVED with button context menu
 import React, { useRef, useState, useEffect } from "react";
 import { Stage, Layer, Rect, Group, Line, Circle, Text } from "react-konva";
 import { Image as KonvaImage } from "react-konva";
@@ -17,6 +17,7 @@ const TimelineKonva = ({
   timelinePxWidth,
   videoRef,
   visibleRange = { start: 0, end: 30 },
+  onAudioTrackAction,
 }) => {
   const stageRef = useRef();
   const PIXELS_PER_SECOND = 10;
@@ -35,7 +36,7 @@ const TimelineKonva = ({
   const initCap = (str) =>
     str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 
-  // ✅ CRITICAL FIX: Frame component with correct positioning
+  // Frame component
   const Frame = ({ src, x, y, w, h, absoluteTime, frameIndex }) => {
     const [image, setImage] = useState(null);
     const [isHovered, setIsHovered] = useState(false);
@@ -59,10 +60,8 @@ const TimelineKonva = ({
 
       console.log(`Frame clicked - Index: ${frameIndex}, Time: ${absoluteTime}s`);
 
-      // Update state FIRST
       onTimeChange(absoluteTime);
       
-      // Then seek video
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.currentTime = absoluteTime;
@@ -135,8 +134,102 @@ const TimelineKonva = ({
     }
   };
 
+  const [contextMenu, setContextMenu] = useState(null);
+  const menuRef = useRef(null);
+  
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const handleClickOutside = (e) => {
+      console.log('Click detected, button:', e.button);
+      
+      if (menuRef.current && menuRef.current.contains(e.target)) {
+        console.log('Clicked inside menu - keeping open');
+        return;
+      }
+      
+      console.log('Clicked outside - closing menu');
+      setContextMenu(null);
+    };
+
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 50);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [contextMenu]);
+
+  // Handle right-click on Stage (track area)
+  const handleStageContextMenu = (e) => {
+    console.log('🎯 Stage context menu triggered');
+    e.evt.preventDefault();
+    
+    const stage = stageRef.current;
+    if (!stage) return;
+    
+    const pointerPos = stage.getPointerPosition();
+    if (!pointerPos) return;
+    
+    // Calculate which track was clicked
+    const clickedY = pointerPos.y - 30; // Subtract ruler height
+    const trackIndex = Math.floor(clickedY / trackHeight);
+    
+    if (trackIndex < 0 || trackIndex >= tracks.length) {
+      console.log('❌ Click outside tracks');
+      return;
+    }
+    
+    const clickedTrack = tracks[trackIndex];
+    console.log('✅ Clicked track:', clickedTrack.type, 'at index', trackIndex);
+    
+    if (clickedTrack.type !== "audio") {
+      console.log('❌ Not audio track, ignoring');
+      return;
+    }
+    
+    const menuData = {
+      x: e.evt.clientX,
+      y: e.evt.clientY,
+      trackId: clickedTrack.id
+    };
+    
+    console.log('✅ Opening menu at:', e.evt.clientX, e.evt.clientY);
+    setContextMenu(menuData);
+  };
+
+  // ✅ NEW: Handle button click/right-click
+  const handleButtonInteraction = (track, e, isRightClick = false) => {
+    console.log('🔘 Button interaction:', track.type, 'isRightClick:', isRightClick);
+    
+    if (isRightClick) {
+      // Right-click on button
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (track.type === "audio") {
+        console.log('✅ Opening context menu from button');
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          trackId: track.id
+        });
+      }
+    } else {
+      // Left-click on button (existing behavior)
+      if (track.type.toLowerCase().includes("video"))
+        onAddVideoRequest?.(track.id);
+      else if (track.type === "audio")
+        onAddAudioRequest?.(track.id);
+      else if (track.type === "text" || track.type === "image")
+        onAddAction?.(track.id, currentTime);
+    }
+  };
+
   return (
-    <div style={{ background: "#222" }}>
+    <div style={{ background: "#222", position: "relative" }}>
       {/* Timeline Ruler */}
       <TimelineRuler
         videoDuration={videoDuration}
@@ -171,19 +264,13 @@ const TimelineKonva = ({
               }}
             >
               <button
-                onClick={() => {
-                  if (track.type.toLowerCase().includes("video"))
-                    onAddVideoRequest?.(track.id);
-                  else if (track.type === "audio")
-                    onAddAudioRequest?.(track.id);
-                  else if (track.type === "text" || track.type === "image")
-                    onAddAction?.(track.id, currentTime);
-                }}
+                onClick={(e) => handleButtonInteraction(track, e, false)}
+                onContextMenu={(e) => handleButtonInteraction(track, e, true)}
                 style={{
                   width: 35,
                   height: trackHeight - 6,
                   marginBottom: 2,
-                  background: "#555",
+                  background: track.type === "audio" ? "#4a9c6d" : "#555",
                   color: "#fff",
                   border: "none",
                   cursor: "pointer",
@@ -195,24 +282,31 @@ const TimelineKonva = ({
                   padding: 0,
                   borderRadius: 3,
                 }}
-                title={`Add ${initCap(track.type)}`}
+                title={track.type === "audio" 
+                  ? "Left-click: Add Audio | Right-click: More options"
+                  : `Add ${initCap(track.type)}`
+                }
               >
                 {initCap(track.type).slice(0, 2)}
               </button>
             </div>
           ))}
         </div>
-
+  
         {/* Konva Stage */}
         <div style={{ minWidth: 0, flex: 1 }}>
           <Stage
             ref={stageRef}
             width={timelineWidth}
             height={tracks.length * trackHeight + 30}
-            onMouseDown={handleScrub}
+            onMouseDown={(e) => {
+              if (e.evt.button === 2) return; // Don't scrub on right-click
+              handleScrub(e);
+            }}
             onMouseMove={(e) => {
               if (e.evt.buttons === 1) handleScrub(e);
             }}
+            onContextMenu={handleStageContextMenu}
           >
             {/* Current time indicator */}
             <Layer>
@@ -238,7 +332,11 @@ const TimelineKonva = ({
                 const trackY = rowIndex * trackHeight + 30;
 
                 return (
-                  <Group key={track.id} x={0} y={trackY}>
+                  <Group
+                    key={track.id}
+                    x={0}
+                    y={trackY}
+                  >
                     <Rect
                       x={0}
                       y={0}
@@ -264,10 +362,8 @@ const TimelineKonva = ({
                       const actionX = timeToX(start);
                       const actionW = timeToX(duration);
 
-                      // ✅ CRITICAL FIX: Proper frame array handling
                       const allFrames = action.allFrames || [];
                       
-                      // Calculate visible frame indices based on viewport
                       const viewportStart = Math.floor(visibleRange.start);
                       const viewportEnd = Math.ceil(visibleRange.end);
 
@@ -326,36 +422,17 @@ const TimelineKonva = ({
                             />
                           )}
 
-                          {/* ✅ CRITICAL FIX: Correct frame rendering */}
                           {track.type === "video" && allFrames.length > 0 && (
                             <>
-                            {(() => {
-                                console.log('📊 Frame Debug:', {
-                                  totalFrames: allFrames.length,
-                                  viewportStart,
-                                  viewportEnd,
-                                  actionStart: start,
-                                  actionEnd: end,
-                                  visibleFrameCount: allFrames.filter((_, idx) => 
-                                    idx >= viewportStart && idx <= viewportEnd
-                                  ).length
-                                });
-                                return null;
-                              })()}
                               {allFrames.map((frameSrc, frameIndex) => {
-                                // frameIndex represents the second in the video (0, 1, 2, 3...)
-                                const absoluteTime = frameIndex; // Frame at index 50 = 50 seconds
+                                const absoluteTime = frameIndex;
                                 
-                                // Skip frames outside viewport
                                 if (absoluteTime < viewportStart || absoluteTime > viewportEnd) {
                                   return null;
                                 }
                                 
-                                // Calculate X position relative to action start (0)
-                                // For a video starting at 0, frame 50 should be at X = 500px
                                 const frameX = (absoluteTime - start) * FRAME_WIDTH;
                                 
-                                // Don't render frames outside action bounds
                                 if (frameX < 0 || frameX >= actionW) {
                                   return null;
                                 }
@@ -373,7 +450,7 @@ const TimelineKonva = ({
                                   />
                                 );
                               })}
-                            </>
+                            </> 
                           )}
                         </Group>
                       );
@@ -383,8 +460,62 @@ const TimelineKonva = ({
               })}
             </Layer>
           </Stage>
-        </div>
+        </div>         
       </div>
+      
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            top: contextMenu.y,
+            left: contextMenu.x,
+            background: "#1b1b1b",
+            border: "1px solid #444",
+            borderRadius: 6,
+            padding: 6,
+            zIndex: 9999,
+            width: 180,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
+          }}
+          onMouseDown={(e) => {
+            console.log('Menu clicked, stopping propagation');
+            e.stopPropagation();
+          }}
+        >  
+          {[
+            //{ label: "➕ Add Audio", action: "add" },  
+            { label: "🔇 Mute", action: "mute" },
+            { label: "🎵 Keep Video Audio", action: "keep" },
+            { label: "🔁 Replace,Added Audio", action: "replaceMode" },
+            { label: "🎚 Mix Both", action: "mix" },
+            { label: "🗑 Delete Track", action: "delete" },
+            //{ label: "✂ Split At Playhead", action: "split" },
+          ].map((item) => (
+            <div
+              key={item.action}
+              style={{
+                padding: "8px 12px",
+                cursor: "pointer",
+                color: "#fff",
+                fontSize: "13px",
+                borderRadius: "4px",
+                transition: "background 0.15s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "#333"}
+              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+              onClick={() => {
+                console.log('✅ Action selected:', item.action);
+                onAudioTrackAction?.(item.action, contextMenu.trackId);
+                setContextMenu(null);
+              }}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

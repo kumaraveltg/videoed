@@ -1,7 +1,6 @@
 // App.jsx
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./app.css";
-import Upload from "./components/Upload";
 import VideoPlayer from "./components/VideoPlayer";
 import MultiTrimSlider from "./components/MultiTrimSlider";
 import YouTubePreview from "./components/YouTubePreview";
@@ -10,6 +9,9 @@ import Loader from "./components/Loader";
 import CompositionPanel from "./components/CompositionPanel";
 import TimelineKonva from "./components/TimelineKonva";
 import VideoOverlayKonva from "./components/VideoOverlayKonva";
+import { AUDIO_MODES ,AudioModeEngine } from "./components/AudioModeEngine";
+import { debugLog, debugGroup, debugGroupEnd } from "./utils/debuggerLog";
+
 
 function App() {
   // ------------------- VIDEO STATE -------------------
@@ -42,6 +44,9 @@ function App() {
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [pendingAudioTrack, setPendingAudioTrack] = useState(null);
   const [pendingVideoTrack, setPendingVideoTrack] = useState(null);
+  const [audioMode, setAudioMode] = useState("keep");
+  const [addedAudioSrc, setAddedAudioSrc] = useState(null);
+   const [isVideoMuted, setIsVideoMuted] = useState(false);
   
   // ✅ NEW: Track timeline scroll position
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
@@ -51,10 +56,10 @@ function App() {
   const videoInputRef = useRef(null);
   const timelineScrollRef = useRef(null);
   const videoRef = useRef(null);
-  const audioRefs = useRef({});
-  const replaceAudioRef = useRef(null);
   const scrollTimeoutRef = useRef(null);
   const lastScrollLeft = useRef(0);
+  const addedAudioRef = useRef();
+  const audioEngineRef = useRef(null);
 
   const PIXELS_PER_SECOND = 10;
   const timelineWidth = videoDuration * PIXELS_PER_SECOND;
@@ -580,82 +585,300 @@ function App() {
   }, [currentTime, isUserScrolling, PIXELS_PER_SECOND, videoDuration]);
 
   // ------------------- AUDIO HANDLING -------------------
-  const [audioConfig, setAudioConfig] = useState({
-    main: {
-      mode: "keep",
-      replaceSrc: null,
-      volume: 1,
-    },
-    second: {
-      mode: "keep",
-      replaceSrc: null,
-      volume: 1,
-    },
-  });
 
-  const handleAddAudio = (file) => {
-    const url = URL.createObjectURL(file);
-    const audio = new Audio(url);
+  // ✅ Initialize audio engine ONLY when audio is added (ONE TIME) 
+useEffect(() => {
+  if (!addedAudioSrc || !videoRef.current || !addedAudioRef.current) {
+    console.log("[AudioEngine] Waiting for audio source...");
+    return;
+  }
 
-    audio.onloadedmetadata = () => {
-      setTracks((prev) =>
-        prev.map((track) =>
-          track.type === "audio"
-            ? {
-                ...track,
-                actions: [
-                  ...track.actions,
-                  {
-                    id: Date.now().toString(),
-                    start: 0,
-                    end: audio.duration,
-                    src: url,
-                    volume: 1,
-                    mode: "mix",
-                  },
-                ],
-              }
-            : track
-        )
-      );
-    };
+  const audio = addedAudioRef.current;
+  const video = videoRef.current;
+
+  const initEngine = () => {
+    try {
+      console.log("[AudioEngine] Creating engine...");
+      
+      // ✅ CRITICAL: Pause both elements first
+      const wasPlaying = !video.paused;
+      const videoTime = video.currentTime;
+      
+      if (wasPlaying) {
+        video.pause();
+      }
+      
+      // ✅ Sync audio to video time BEFORE creating engine
+      audio.currentTime = videoTime;
+      console.log("  → Synced to time:", videoTime.toFixed(2));
+      
+      // ✅ Wait a frame for currentTime to settle
+      requestAnimationFrame(() => {
+        audioEngineRef.current = new AudioModeEngine(video, audio);
+        audioEngineRef.current.sync();
+        audioEngineRef.current.setMode(audioMode);
+        
+        console.log("[AudioEngine] ✅ Engine initialized");
+        
+        // ✅ Resume playback if it was playing
+        if (wasPlaying) {
+          setTimeout(() => {
+            video.play().catch(e => console.warn("Resume failed:", e));
+          }, 100);
+        }
+      });
+      
+    } catch (error) {
+      console.error("[AudioEngine] Failed to initialize:", error);
+      if (error.message.includes("already connected")) {
+        alert("Audio engine error. Please refresh the page.");
+      }
+    }
   };
 
-  // Audio playback sync
-  useEffect(() => {
-    const audioTrack = tracks.find((t) => t.type === "audio");
-    if (!audioTrack) return;
+  // Wait for audio to be ready
+  if (audio.readyState >= 2) { // HAVE_CURRENT_DATA or better
+    initEngine();
+  } else {
+    const onReady = () => {
+      console.log("[AudioEngine] Audio element ready");
+      initEngine();
+    };
+    audio.addEventListener('loadeddata', onReady, { once: true });
+    
+    return () => {
+      audio.removeEventListener('loadeddata', onReady);
+    };
+  }
 
-    audioTrack.actions.forEach((action) => {
-      if (!audioRefs.current[action.id]) {
-        audioRefs.current[action.id] = new Audio(action.src);
+  return () => {
+    console.log("[AudioEngine] Cleaning up engine");
+    if (audioEngineRef.current) {
+      if (addedAudioRef.current) {
+        addedAudioRef.current.pause();
       }
+    }
+    audioEngineRef.current = null;
+  };
+}, [addedAudioSrc]);
 
-      const audio = audioRefs.current[action.id];
-      const active = currentTime >= action.start && currentTime <= action.end;
+// ✅ Apply mode changes SEPARATELY
+useEffect(() => {
+  console.log("[App] Mode state changed to:", audioMode);
+  
+  if (!audioEngineRef.current) {
+    // Fallback for no engine
+    if (videoRef.current) {
+      const shouldMute = audioMode === AUDIO_MODES.MUTE;
+      console.log(`[Fallback] Video muted: ${shouldMute}`);
+      videoRef.current.muted = shouldMute;
+    }
+    return;
+  }
 
-      if (active) {
-        audio.currentTime = Math.max(0, currentTime - action.start);
-        const vol = Number.isFinite(action.volume)
-          ? Math.min(1, Math.max(0, action.volume))
-          : 1;
-        audio.volume = vol;
+  // ✅ Apply mode with delay to ensure audio element is ready
+  const applyMode = () => {
+    try {
+      console.log("[App] Applying mode via engine:", audioMode);
+      audioEngineRef.current.setMode(audioMode);
+      console.log("[App] ✅ Mode applied successfully");
+    } catch (error) {
+      console.error("[App] Failed to apply mode:", error);
+    }
+  };
 
-        if (audio.paused) {
-          audio.play().catch(() => {});
-        }
-      } else {
-        audio.pause();
-      }
+  // Delay ensures React state updates are complete
+  const timeoutId = setTimeout(applyMode, 50);
+  
+  return () => clearTimeout(timeoutId);
+}, [audioMode]);
+  
+  
+  
+ // ✅ HANDLE AUDIO TRACK ACTIONS
+  const handleAudioTrackAction = (action, trackId) => {
+    console.log("[handleAudioTrackAction] Action:", { 
+      action, 
+      trackId, 
+      hasEngine: !!audioEngineRef.current,
+      hasAudio: !!addedAudioSrc,
+      currentMode: audioMode
     });
-  }, [currentTime, tracks]);
+    
+    switch (action) {
+      case "add":
+        setPendingAudioTrack(trackId);
+        audioInputRef.current?.click();
+        break;
+
+      case "mute":
+        console.log("🔇 Setting MUTE mode");
+        setAudioMode(AUDIO_MODES.MUTE);
+        break;
+
+      case "keep":
+        console.log("🎵 Setting KEEP mode");
+        setAudioMode(AUDIO_MODES.KEEP);
+        break;
+
+      case "replaceMode":
+        console.log("🔁 Setting REPLACE mode");
+        if (!addedAudioSrc) {
+          alert("⚠️ Please add an audio file first");
+          return;
+        }
+        setAudioMode(AUDIO_MODES.REPLACE);
+        break;
+
+      case "mix":
+        console.log("🎚 Setting MIX mode");
+        if (!addedAudioSrc) {
+          alert("⚠️ Please add an audio file first");
+          return;
+        }
+        setAudioMode(AUDIO_MODES.MIX);
+        break;
+
+      case "split":
+        if (!addedAudioSrc) {
+          alert("⚠️ Please add an audio file first");
+          return;
+        }
+        splitAudioAtPlayhead(trackId);
+        break;
+
+      case "delete":
+        removeAudioTrack(trackId);
+        break;
+
+      default:
+        console.warn("Unknown audio action:", action);
+    }
+  };
+
+
+
+ // ✅ ADD AUDIO FILE
+  const handleAddAudio = (file, trackId) => {
+  console.log("[handleAddAudio] Adding audio:", file.name);
+  
+  const url = URL.createObjectURL(file);
+  
+  const audio = new Audio(url);
+  audio.onloadedmetadata = () => {
+    console.log("[handleAddAudio] Metadata loaded");
+    console.log("  → Duration:", audio.duration);
+    
+    // ✅ CRITICAL: Set source FIRST, wait for React to render
+    setAddedAudioSrc(url);
+    
+    // ✅ Add to tracks
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === trackId
+          ? {
+              ...track,
+              actions: [
+                {
+                  id: Date.now().toString(),
+                  start: 0,
+                  end: audio.duration,
+                  src: url,
+                  volume: 1,
+                },
+              ],
+            }
+          : track
+      )
+    );
+    
+    // ✅ Switch to MIX mode after engine initializes
+    setTimeout(() => {
+      console.log("[handleAddAudio] Switching to MIX mode");
+      setAudioMode(AUDIO_MODES.MIX);
+    }, 500); // Increased delay to ensure engine is ready
+  };
+  
+  audio.onerror = (e) => {
+    console.error("[handleAddAudio] Failed to load:", e);
+    alert("Failed to load audio file");
+  };
+};
+  // ✅ Remove audio track
+ const removeAudioTrack = (trackId) => {
+    console.log("[removeAudioTrack] Removing track:", trackId);
+    
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === trackId ? { ...track, actions: [] } : track
+      )
+    );
+    
+    // Clean up audio source
+    if (addedAudioSrc) {
+      URL.revokeObjectURL(addedAudioSrc);
+    }
+    
+    setAddedAudioSrc(null);
+    setAudioMode(AUDIO_MODES.KEEP);
+    
+    // Reset engine
+    audioEngineRef.current = null;
+    
+    // Unmute video
+    if (videoRef.current) {
+      videoRef.current.muted = false;
+    }
+    
+    console.log("[removeAudioTrack] ✅ Track removed");
+  };
+
+  // ✅ Split audio at playhead
+   const splitAudioAtPlayhead = (trackId) => {
+    console.log("[splitAudioAtPlayhead] Splitting at:", currentTime);
+    
+    setTracks((prev) =>
+      prev.map((track) => {
+        if (track.id !== trackId) return track;
+        
+        const newActions = [];
+        track.actions.forEach((action) => {
+          if (currentTime > action.start && currentTime < action.end) {
+            // Split into two parts
+            console.log(`Splitting action ${action.id} at ${currentTime}s`);
+            newActions.push(
+              { 
+                ...action, 
+                id: action.id,
+                end: currentTime 
+              },
+              { 
+                ...action, 
+                id: `${action.id}-split-${Date.now()}`,
+                start: currentTime 
+              }
+            );
+          } else {
+            newActions.push(action);
+          }
+        });
+        
+        console.log("[splitAudioAtPlayhead] New actions count:", newActions.length);
+        return { ...track, actions: newActions };
+      })
+    );
+  };
+     
+
+  
+  
 
   // ------------------- RENDER -------------------
   return (
     <div style={{ padding: 20 }}>
       <h2>🎬 Video Editor</h2>
 
-      <YouTubePreview url="" />
+      <YouTubePreview url="" /> 
 
       <div
         style={{
@@ -686,6 +909,7 @@ function App() {
         )}
 
         {!splitMode && (
+          <div style={{ position: "relative", width: videoWidthPx || 640 }}>
           <VideoPlayer
             key={activeVideoSrc}
             ref={videoRef}
@@ -702,6 +926,18 @@ function App() {
               setVideoDuration(e.target.duration);
             }}
           />
+          {/* ✅ Hidden audio element */}
+        {addedAudioSrc && (
+          <audio
+            ref={addedAudioRef}
+            src={addedAudioSrc}
+            style={{ display: "none" }}
+            preload="auto"
+            onError={(e) => console.error("[Audio Element] Load error:", e)}
+            onLoadedData={() => console.log("[Audio Element] ✅ Loaded")}
+          />
+        )}
+      </div>
         )}
 
         <div
@@ -726,15 +962,7 @@ function App() {
               onUpdateAction={handleUpdateAction}
             />
           )}
-
-          {audioConfig.main.mode === "replace" &&
-            audioConfig.main.replaceSrc && (
-              <audio
-                ref={replaceAudioRef}
-                src={audioConfig.main.replaceSrc}
-                preload="auto"
-              />
-            )}
+ 
         </div>
 
         {splitMode && (
@@ -801,7 +1029,50 @@ function App() {
             audioInputRef.current?.click();
           }}
           onAddVideoRequest={handleAddVideoRequest}
+          onAudioTrackAction={handleAudioTrackAction}
+          audioMode={audioMode}
         />
+      </div>
+      {/* ✅ Audio Mode Indicator */}
+      <div style={{ 
+        marginTop: 15, 
+        padding: 14, 
+        background: audioEngineRef.current ? "#1e3a2e" : "#2a2a2a",
+        borderRadius: 8,
+        border: `2px solid ${
+          audioMode === AUDIO_MODES.MUTE ? "#ef4444" :
+          audioMode === AUDIO_MODES.KEEP ? "#3b82f6" :
+          audioMode === AUDIO_MODES.REPLACE ? "#f59e0b" :
+          "#10b981"
+        }`
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <strong style={{ color: "#fff" }}>🎵 Audio Mode:</strong>
+          <span style={{ 
+            background: "#000",
+            color: "#fff",
+            padding: "6px 14px", 
+            borderRadius: 6,
+            fontFamily: "monospace",
+            fontSize: 15,
+            fontWeight: "bold"
+          }}>
+            {audioMode.toUpperCase()}
+          </span>
+
+          <div style={{ marginLeft: "auto", fontSize: 13, color: "#d1d5db" }}>
+            {!addedAudioSrc && <span style={{ color: "#9ca3af" }}>💿 No audio</span>}
+            {addedAudioSrc && !audioEngineRef.current && <span style={{ color: "#fbbf24" }}>⏳ Initializing...</span>}
+            {audioEngineRef.current && <span style={{ color: "#34d399" }}>✅ Active</span>}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af", paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          {audioMode === AUDIO_MODES.MUTE && "🔇 All audio muted"}
+          {audioMode === AUDIO_MODES.KEEP && "🎵 Video audio only"}
+          {audioMode === AUDIO_MODES.REPLACE && "🔁 Added audio only"}
+          {audioMode === AUDIO_MODES.MIX && "🎚 Both mixed (70% each)"}
+        </div>
       </div>
 
       <div style={{ marginTop: 10 }}>
