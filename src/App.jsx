@@ -46,7 +46,7 @@ function App() {
   const [pendingVideoTrack, setPendingVideoTrack] = useState(null);
   const [audioMode, setAudioMode] = useState("keep");
   const [addedAudioSrc, setAddedAudioSrc] = useState(null);
-   const [isVideoMuted, setIsVideoMuted] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   
   // ✅ NEW: Track timeline scroll position
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
@@ -60,6 +60,7 @@ function App() {
   const lastScrollLeft = useRef(0);
   const addedAudioRef = useRef();
   const audioEngineRef = useRef(null);
+  const addedAudioFileRef = useRef(null);
 
   const PIXELS_PER_SECOND = 10;
   const timelineWidth = videoDuration * PIXELS_PER_SECOND;
@@ -771,7 +772,9 @@ useEffect(() => {
     
     // ✅ CRITICAL: Set source FIRST, wait for React to render
     setAddedAudioSrc(url);
-    
+
+    addedAudioFileRef.current = file;
+
     // ✅ Add to tracks
     setTracks((prev) =>
       prev.map((track) =>
@@ -792,6 +795,8 @@ useEffect(() => {
       )
     );
     
+     
+
     // ✅ Switch to MIX mode after engine initializes
     setTimeout(() => {
       console.log("[handleAddAudio] Switching to MIX mode");
@@ -804,6 +809,92 @@ useEffect(() => {
     alert("Failed to load audio file");
   };
 };
+ 
+
+//------------------- EXPORT AUDIO MODE -------------------
+const handleExportAudioMode = async () => {
+
+  if (!serverFilename) {
+    alert("No video uploaded to server");
+    return;
+  }
+
+  if (
+    (audioMode === AUDIO_MODES.REPLACE ||
+     audioMode === AUDIO_MODES.MIX) &&
+    !addedAudioFileRef.current
+  ) {
+    alert("Please add an audio file first");
+    return;
+  }
+
+  try {
+    setIsProcessingAudio(true);
+
+    let audioFilename = null;
+
+    // ✅ upload audio FIRST
+    if (
+      addedAudioFileRef.current &&
+      (audioMode === AUDIO_MODES.REPLACE ||
+       audioMode === AUDIO_MODES.MIX)
+    ) {
+
+      const fd = new FormData();
+      fd.append("file", addedAudioFileRef.current);
+
+      const uploadRes = await fetch(
+        "http://localhost:8000/upload/local",
+        {
+          method: "POST",
+          body: fd,
+        }
+      );
+
+      if (!uploadRes.ok)
+        throw new Error("Audio upload failed");
+
+      const uploadData = await uploadRes.json();
+
+      // ✅ USE SERVER RETURNED NAME
+      audioFilename = uploadData.filename;
+    }
+
+    const payload = {
+      filename: serverFilename,
+      mode: audioMode,
+      audio_filename: audioFilename,
+    };
+
+    const response = await fetch(
+      "http://localhost:8000/video/audio-control",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error);
+    }
+
+    const data = await response.json();
+
+    setVideoSrc(data.video_url);
+    setServerFilename(data.output);
+
+    alert(`Audio ${audioMode} done`);
+
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  } finally {
+    setIsProcessingAudio(false);
+  }
+};
+
   // ✅ Remove audio track
  const removeAudioTrack = (trackId) => {
     console.log("[removeAudioTrack] Removing track:", trackId);
@@ -819,6 +910,7 @@ useEffect(() => {
       URL.revokeObjectURL(addedAudioSrc);
     }
     
+    addedAudioFileRef.current = null;
     setAddedAudioSrc(null);
     setAudioMode(AUDIO_MODES.KEEP);
     
@@ -868,8 +960,8 @@ useEffect(() => {
       })
     );
   };
-     
-
+  
+ 
   
   
 
@@ -1035,68 +1127,93 @@ useEffect(() => {
       </div>
       {/* ✅ Audio Mode Indicator */}
       <div style={{ 
-        marginTop: 15, 
-        padding: 14, 
-        background: audioEngineRef.current ? "#1e3a2e" : "#2a2a2a",
-        borderRadius: 8,
-        border: `2px solid ${
-          audioMode === AUDIO_MODES.MUTE ? "#ef4444" :
-          audioMode === AUDIO_MODES.KEEP ? "#3b82f6" :
-          audioMode === AUDIO_MODES.REPLACE ? "#f59e0b" :
-          "#10b981"
-        }`
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <strong style={{ color: "#fff" }}>🎵 Audio Mode:</strong>
-          <span style={{ 
-            background: "#000",
-            color: "#fff",
-            padding: "6px 14px", 
-            borderRadius: 6,
-            fontFamily: "monospace",
-            fontSize: 15,
-            fontWeight: "bold"
-          }}>
-            {audioMode.toUpperCase()}
-          </span>
+  marginTop: 15, 
+  padding: 14, 
+  background: audioEngineRef.current ? "#1e3a2e" : "#2a2a2a",
+  borderRadius: 8,
+  border: `2px solid ${
+    audioMode === AUDIO_MODES.MUTE ? "#ef4444" :
+    audioMode === AUDIO_MODES.KEEP ? "#3b82f6" :
+    audioMode === AUDIO_MODES.REPLACE ? "#f59e0b" :
+    "#10b981"
+  }`
+}}>
+  {/* ... existing audio mode indicator content ... */}
+</div>
 
-          <div style={{ marginLeft: "auto", fontSize: 13, color: "#d1d5db" }}>
-            {!addedAudioSrc && <span style={{ color: "#9ca3af" }}>💿 No audio</span>}
-            {addedAudioSrc && !audioEngineRef.current && <span style={{ color: "#fbbf24" }}>⏳ Initializing...</span>}
-            {audioEngineRef.current && <span style={{ color: "#34d399" }}>✅ Active</span>}
-          </div>
-        </div>
+{/* ✅ ADD THIS NEW SECTION RIGHT AFTER THE AUDIO MODE INDICATOR */}
+<div style={{ marginTop: 20 }}>
+  <button
+    onClick={handleExportAudioMode}
+    disabled={isProcessingAudio || !serverFilename}
+    style={{
+      padding: "12px 24px",
+      fontSize: 16,
+      fontWeight: "bold",
+      background: isProcessingAudio
+        ? "#6b7280"
+        : audioMode === AUDIO_MODES.MUTE
+        ? "#ef4444"
+        : audioMode === AUDIO_MODES.KEEP
+        ? "#3b82f6"
+        : audioMode === AUDIO_MODES.REPLACE
+        ? "#f59e0b"
+        : "#10b981",
+      color: "white",
+      border: "none",
+      borderRadius: 8,
+      cursor: isProcessingAudio || !serverFilename ? "not-allowed" : "pointer",
+      opacity: isProcessingAudio || !serverFilename ? 0.6 : 1,
+      transition: "all 0.2s",
+    }}
+  >
+    {isProcessingAudio ? (
+      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Loader /> Processing Audio...
+      </span>
+    ) : (
+      `🎬 Export Video with ${audioMode.toUpperCase()} Audio`
+    )}
+  </button>
+  
+  <div style={{ marginTop: 10 }}>
+    {!serverFilename && (
+      <p style={{ color: "#f59e0b", fontSize: 14, margin: 0 }}>
+        ⚠️ Upload a video first to enable audio export
+      </p>
+    )}
+    
+    {serverFilename && !addedAudioSrc && (audioMode === AUDIO_MODES.REPLACE || audioMode === AUDIO_MODES.MIX) && (
+      <p style={{ color: "#f59e0b", fontSize: 14, margin: 0 }}>
+        ⚠️ Add an audio file for {audioMode.toUpperCase()} mode
+      </p>
+    )}
+    
+    {serverFilename && addedAudioSrc && (audioMode === AUDIO_MODES.REPLACE || audioMode === AUDIO_MODES.MIX) && (
+      <p style={{ color: "#34d399", fontSize: 14, margin: 0 }}>
+        ✅ Ready to export with {audioMode.toUpperCase()} audio
+      </p>
+    )}
+    
+    {serverFilename && audioMode === AUDIO_MODES.MUTE && (
+      <p style={{ color: "#9ca3af", fontSize: 14, margin: 0 }}>
+        ℹ️ Video will be exported without audio
+      </p>
+    )}
+    
+    {serverFilename && audioMode === AUDIO_MODES.KEEP && (
+      <p style={{ color: "#60a5fa", fontSize: 14, margin: 0 }}>
+        ℹ️ Video will keep its original audio
+      </p>
+    )}
+  </div>
+</div>
 
-        <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af", paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          {audioMode === AUDIO_MODES.MUTE && "🔇 All audio muted"}
-          {audioMode === AUDIO_MODES.KEEP && "🎵 Video audio only"}
-          {audioMode === AUDIO_MODES.REPLACE && "🔁 Added audio only"}
-          {audioMode === AUDIO_MODES.MIX && "🎚 Both mixed (70% each)"}
-        </div>
-      </div>
-
-      <div style={{ marginTop: 10 }}>
-        {selectedAction && selectedAction.text !== undefined && (
-          <input
-            value={selectedAction.text}
-            onChange={(e) =>
-              handleUpdateAction(selectedAction.id, { text: e.target.value })
-            }
-            placeholder="Edit text"
-            style={{
-              padding: "8px 12px",
-              fontSize: 14,
-              width: 300,
-              border: "1px solid #555",
-              borderRadius: 4,
-            }}
-          />
-        )}
-      </div>
 
       <button onClick={handleAddTextOverlay} style={{ marginTop: 10 }}>
         Add Text Overlays to Video
       </button>
+      
 
       <MultiTrimSlider
         duration={duration}
