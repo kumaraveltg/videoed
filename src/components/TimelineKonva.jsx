@@ -17,7 +17,9 @@ const TimelineKonva = ({
   timelinePxWidth,
   videoRef,
   visibleRange = { start: 0, end: 30 },
-  onAudioTrackAction,
+  onAudioTrackAction,onSplit,clips = [],  razorMode,setRazorMode,
+  onAddSecondVideoRequest,  
+  onSecondVideoTrackAction,
 }) => {
   const stageRef = useRef();
   const PIXELS_PER_SECOND = 10;
@@ -36,10 +38,16 @@ const TimelineKonva = ({
   const initCap = (str) =>
     str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 
+  
+
   // Frame component
-  const Frame = ({ src, x, y, w, h, absoluteTime, frameIndex }) => {
+  const Frame = ({ src, x, y, w, h, absoluteTime, frameIndex ,razorMode,onTimeChange, videoRef }) => {
     const [image, setImage] = useState(null);
     const [isHovered, setIsHovered] = useState(false);
+
+    useEffect(() => {
+    //console.log(`Frame ${frameIndex} - razorMode:`, razorMode);
+  }, [razorMode, frameIndex]);
 
     useEffect(() => {
       if (!src) return;
@@ -54,8 +62,10 @@ const TimelineKonva = ({
     }, [src]);
 
     const handleClick = (e) => {
+      console.log(`🖱️ Frame ${frameIndex} clicked! razorMode:`, razorMode); 
       e.cancelBubble = true;
-      
+      if ( razorMode) { console.log('⚠️ Razor mode active - ignoring frame click'); 
+        return; }
       if (!onTimeChange || !videoRef?.current) return;
 
       console.log(`Frame clicked - Index: ${frameIndex}, Time: ${absoluteTime}s`);
@@ -82,14 +92,15 @@ const TimelineKonva = ({
           height={h}
           onClick={handleClick}
           onTap={handleClick}
-          onMouseEnter={() => setIsHovered(true)}
+          onMouseEnter={() => !razorMode && setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           opacity={isHovered ? 0.9 : 1}
           shadowBlur={isHovered ? 5 : 0}
           shadowColor="rgba(255,255,255,0.5)"
+          listening = {true}
         />
         
-        {isHovered && (
+        {isHovered && !razorMode && (
           <>
             <Rect
               x={x}
@@ -217,307 +228,456 @@ const TimelineKonva = ({
           trackId: track.id
         });
       }
-    } else {
+     else if (track.type === "secondvideo") {
+            // ✅ ADD THIS: Right-click menu for second video
+            console.log('✅ Opening context menu from button (secondvideo)');
+            setContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              trackId: track.id,
+              trackType: 'secondvideo' // ✅ Add trackType
+            });
+          }
+        }     
+    else {
       // Left-click on button (existing behavior)
       if (track.type.toLowerCase().includes("video"))
         onAddVideoRequest?.(track.id);
       else if (track.type === "audio")
         onAddAudioRequest?.(track.id);
       else if (track.type === "text" || track.type === "image")
+        
         onAddAction?.(track.id, currentTime);
+      else if (track.type === "secondvideo") {
+      // ✅ Second video track
+      console.log('📹 Adding second video');
+      onAddSecondVideoRequest?.(track.id);
+    }   
     }
   };
+  
 
-  return (
-    <div style={{ background: "#222", position: "relative" }}>
-      {/* Timeline Ruler */}
-      <TimelineRuler
-        videoDuration={videoDuration}
-        currentTime={currentTime}
-        scrollLeft={scrollLeft}
-        PIXELS_PER_SECOND={PIXELS_PER_SECOND}
-        height={50}
-        onTimeChange={onTimeChange}
-      />
+ return (
+  <div style={{ background: "#222", position: "relative" }}>
+    <button 
+      onClick={() => {
+        console.log("🔘 Razor button clicked, current:", razorMode);
+        setRazorMode(v => !v);
+      }}
+      style={{
+        padding: '8px 16px',
+        background: razorMode ? '#ef4444' : '#3b82f6',
+        color: 'white',
+        border: 'none',
+        borderRadius: 4,
+        cursor: 'pointer',
+        fontWeight: 'bold',
+        marginBottom: 10
+      }}
+    >
+      {razorMode ? "✂️ Razor Active (Click to Disable)" : "✂️ Enable Razor Tool"}
+    </button>
 
-      {/* Main timeline */}
-      <div style={{ display: "flex", borderTop: "1px solid #555" }}>
-        {/* Add buttons */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            paddingTop: 30,
-            flexShrink: 0,
-            background: "#1a1a1a",
-            borderRight: "1px solid #555",
-          }}
-        >
-          {tracks.map((track) => (
-            <div
-              key={track.id}
+    {razorMode && (
+      <div style={{ 
+        padding: 8, 
+        background: '#fef3c7', 
+        color: '#92400e',
+        borderRadius: 4,
+        marginBottom: 10,
+        fontSize: 13
+      }}>
+        ⚠️ Click on the timeline to split at that position
+      </div>
+    )}
+    
+    {/* Timeline Ruler */}
+    <TimelineRuler
+      videoDuration={videoDuration}
+      currentTime={currentTime}
+      scrollLeft={scrollLeft}
+      PIXELS_PER_SECOND={PIXELS_PER_SECOND}
+      height={50}
+      onTimeChange={onTimeChange}
+    />
+
+    {/* Main timeline */}
+    <div style={{ display: "flex", borderTop: "1px solid #555" }}>
+      {/* Add buttons */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          paddingTop: 30,
+          flexShrink: 0,
+          background: "#1a1a1a",
+          borderRight: "1px solid #555",
+        }}
+      >
+        {tracks.map((track) => (
+          <div
+            key={track.id}
+            style={{
+              height: trackHeight,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              onClick={(e) => handleButtonInteraction(track, e, false)}
+              onContextMenu={(e) => handleButtonInteraction(track, e, true)}
               style={{
-                height: trackHeight,
+                width: 35,
+                height: trackHeight - 6,
+                marginBottom: 2,
+                background: track.type === "audio" 
+                  ? "#4a9c6d" 
+                  : track.type === "secondvideo"
+                  ? "#8b5cf6"   
+                  : "#555",
+                color: "#fff",
+                border: "none",
+                cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                fontSize: 12,
+                fontWeight: "bold",
+                padding: 0,
+                borderRadius: 3,
               }}
-            >
-              <button
-                onClick={(e) => handleButtonInteraction(track, e, false)}
-                onContextMenu={(e) => handleButtonInteraction(track, e, true)}
-                style={{
-                  width: 35,
-                  height: trackHeight - 6,
-                  marginBottom: 2,
-                  background: track.type === "audio" ? "#4a9c6d" : "#555",
-                  color: "#fff",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  fontWeight: "bold",
-                  padding: 0,
-                  borderRadius: 3,
-                }}
-                title={track.type === "audio" 
+              title={
+                track.type === "audio" 
                   ? "Left-click: Add Audio | Right-click: More options"
+                  : track.type === "secondvideo"
+                  ? "Left-click: Add Second Video | Right-click: Remove" // ✅ Updated tooltip
                   : `Add ${initCap(track.type)}`
-                }
-              >
-                {initCap(track.type).slice(0, 2)}
-              </button>
-            </div>
-          ))}
-        </div>
-  
-        {/* Konva Stage */}
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <Stage
-            ref={stageRef}
-            width={timelineWidth}
-            height={tracks.length * trackHeight + 30}
-            onMouseDown={(e) => {
-              if (e.evt.button === 2) return; // Don't scrub on right-click
-              handleScrub(e);
-            }}
-            onMouseMove={(e) => {
-              if (e.evt.buttons === 1) handleScrub(e);
-            }}
-            onContextMenu={handleStageContextMenu}
-          >
-            {/* Current time indicator */}
-            <Layer>
-              <Line
-                points={[
-                  timeToX(currentTime),
-                  0,
-                  timeToX(currentTime),
-                  tracks.length * trackHeight + 30,
-                ]}
-                stroke="#ff4444"
-                strokeWidth={2}
-                listening={false}
-                shadowColor="#ff0000"
-                shadowBlur={8}
-                shadowOpacity={0.6}
-              />
-            </Layer>
-
-            {/* TRACKS */}
-            <Layer>
-              {tracks.map((track, rowIndex) => {
-                const trackY = rowIndex * trackHeight + 30;
-
-                return (
-                  <Group
-                    key={track.id}
-                    x={0}
-                    y={trackY}
-                  >
-                    <Rect
-                      x={0}
-                      y={0}
-                      width={timelineWidth}
-                      height={trackHeight - 2}
-                      fill="#333"
-                    />
-
-                    <Text
-                      x={5}
-                      y={5}
-                      text={initCap(track.type)}
-                      fontSize={11}
-                      fill="#888"
-                      fontFamily="Arial"
-                      listening={false}
-                    />
-
-                    {track.actions?.map((action) => {
-                      const start = action.start ?? 0;
-                      const end = action.end ?? start + 1;
-                      const duration = Math.max(0.2, end - start);
-                      const actionX = timeToX(start);
-                      const actionW = timeToX(duration);
-
-                      const allFrames = action.allFrames || [];
-                      
-                      const viewportStart = Math.floor(visibleRange.start);
-                      const viewportEnd = Math.ceil(visibleRange.end);
-
-                      let color = "#999";
-                      if (track.type === "text") color = "lightblue";
-                      if (track.type === "audio") color = "lightgreen";
-                      if (track.type === "image") color = "orange";
-                      if (track.type === "video") color = "#4a5568";
-
-                      return (
-                        <Group key={action.id} x={actionX} y={4}>
-                          <Rect
-                            x={0}
-                            y={0}
-                            width={actionW}
-                            height={trackHeight - 10}
-                            fill={color}
-                            opacity={0.6}
-                            cornerRadius={4}
-                            stroke="#fff"
-                            strokeWidth={1}
-                          />
-
-                          {track.type === "text" && (
-                            <>
-                              <Circle
-                                x={actionW - 10}
-                                y={8}
-                                radius={6}
-                                fill="red"
-                                onClick={() =>
-                                  onDeleteAction(track.id, action.id)
-                                }
-                              />
-                              <Text
-                                x={actionW - 13}
-                                y={4}
-                                text="×"
-                                fontSize={12}
-                                fill="#fff"
-                                onClick={() =>
-                                  onDeleteAction(track.id, action.id)
-                                }
-                              />
-                            </>
-                          )}
-
-                          {track.type === "text" && action.text && (
-                            <Text
-                              x={5}
-                              y={(trackHeight - 10) / 2 - 6}
-                              text={action.text}
-                              fontSize={12}
-                              fill="#fff"
-                              listening={false}
-                            />
-                          )}
-
-                          {track.type === "video" && allFrames.length > 0 && (
-                            <>
-                              {allFrames.map((frameSrc, frameIndex) => {
-                                const absoluteTime = frameIndex;
-                                
-                                if (absoluteTime < viewportStart || absoluteTime > viewportEnd) {
-                                  return null;
-                                }
-                                
-                                const frameX = (absoluteTime - start) * FRAME_WIDTH;
-                                
-                                if (frameX < 0 || frameX >= actionW) {
-                                  return null;
-                                }
-
-                                return (
-                                  <Frame
-                                    key={`${action.id}-frame-${frameIndex}`}
-                                    src={frameSrc}
-                                    x={frameX}
-                                    y={0}
-                                    w={FRAME_WIDTH}
-                                    h={trackHeight - 10}
-                                    absoluteTime={absoluteTime}
-                                    frameIndex={frameIndex}
-                                  />
-                                );
-                              })}
-                            </> 
-                          )}
-                        </Group>
-                      );
-                    })}
-                  </Group>
-                );
-              })}
-            </Layer>
-          </Stage>
-        </div>         
+              }
+            >
+             {track.type === "secondvideo" ? "2V" : initCap(track.type).slice(0, 2)}
+            </button>
+          </div>
+        ))}
       </div>
-      
-      {/* Context Menu */}
-      {contextMenu && (
-        <div
-          ref={menuRef}
-          style={{
-            position: "fixed",
-            top: contextMenu.y,
-            left: contextMenu.x,
-            background: "#1b1b1b",
-            border: "1px solid #444",
-            borderRadius: 6,
-            padding: 6,
-            zIndex: 9999,
-            width: 180,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
+
+      {/* Konva Stage */}
+      <div style={{ minWidth: 0, flex: 1, position: 'relative' }}>
+        <Stage
+          ref={stageRef}
+          width={timelineWidth}
+          height={tracks.length * trackHeight + 30}
+          style={{ 
+            display: 'block',
+            background: '#1a1a1a'
           }}
           onMouseDown={(e) => {
-            console.log('Menu clicked, stopping propagation');
-            e.stopPropagation();
+            console.log("🎯🎯🎯 STAGE CLICKED - razorMode:", razorMode, "button:", e.evt.button);
+            
+            if (e.evt.button === 2) {
+              console.log("⏭️ Right-click ignored");
+              return;
+            }
+            
+            if (razorMode) {
+              console.log("✂️✂️✂️ RAZOR MODE ACTIVE - SPLITTING");
+              const stage = e.target.getStage();
+              const pos = stage.getPointerPosition();
+
+              if (!pos) {
+                console.log("❌ No position");
+                return;
+              }
+
+              const time = (pos.x + scrollLeft) / PIXELS_PER_SECOND;
+              console.log("✅✅✅ SPLIT TIME:", time);
+              
+              if (onSplit) {
+                onSplit(time);
+                console.log("✅ onSplit called");
+              } else {
+                console.log("❌ onSplit is undefined");
+              }
+              
+              return;
+            }
+            
+            console.log("🎬 Normal scrub mode");
+            handleScrub(e);
           }}
-        >  
-          {[
-            //{ label: "➕ Add Audio", action: "add" },  
-            { label: "🔇 Mute", action: "mute" },
-            { label: "🎵 Keep Video Audio", action: "keep" },
-            { label: "🔁 Replace,Added Audio", action: "replaceMode" },
-            { label: "🎚 Mix Both", action: "mix" },
-            { label: "🗑 Delete Track", action: "delete" },
-            //{ label: "✂ Split At Playhead", action: "split" },
-          ].map((item) => (
-            <div
-              key={item.action}
-              style={{
-                padding: "8px 12px",
-                cursor: "pointer",
-                color: "#fff",
-                fontSize: "13px",
-                borderRadius: "4px",
-                transition: "background 0.15s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = "#333"}
-              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-              onClick={() => {
-                console.log('✅ Action selected:', item.action);
-                onAudioTrackAction?.(item.action, contextMenu.trackId);
-                setContextMenu(null);
-              }}
-            >
-              {item.label}
-            </div>
-          ))}
-        </div>
-      )}
+          onMouseMove={(e) => {
+            if (e.evt.buttons === 1 && !razorMode) {
+              handleScrub(e);
+            }
+          }}
+          onContextMenu={handleStageContextMenu}
+        >
+          {/* Current time indicator */}
+          <Layer>
+            <Line
+              points={[
+                timeToX(currentTime),
+                0,
+                timeToX(currentTime),
+                tracks.length * trackHeight + 30,
+              ]}
+              stroke="#ff4444"
+              strokeWidth={2}
+              listening={false}
+              shadowColor="#ff0000"
+              shadowBlur={8}
+              shadowOpacity={0.6}
+            />
+          </Layer> 
+
+          {/* TRACKS - Disable listening in razor mode */}
+          <Layer listening={!razorMode}>
+            {tracks.map((track, rowIndex) => {
+              const trackY = rowIndex * trackHeight + 30;
+              let trackBgColor = "#333";
+              if (track.type === "secondvideo") {
+                trackBgColor = "#2d1b4e"; // Darker purple
+              }
+              return (
+                <Group key={track.id} x={0} y={trackY}>
+                  <Rect
+                    x={0}
+                    y={0}
+                    width={timelineWidth}
+                    height={trackHeight - 2}
+                    fill={trackBgColor}
+                    listening={false}
+                  />
+
+                  <Text
+                    x={5}
+                    y={5}
+                    text={track.type === "secondvideo" ? "Second Video" : initCap(track.type)}
+                    fontSize={11}
+                    fill={track.type === "secondvideo" ? "#c4b5fd" : "#888"}
+                    fontFamily="Arial"
+                    listening={false}
+                  />
+
+                  {track.actions?.map((action) => {
+                    const start = action.start ?? 0;
+                    const end = action.end ?? start + 1;
+                    const duration = Math.max(0.2, end - start);
+                    const actionX = timeToX(start);
+                    const actionW = timeToX(duration);
+
+                    const allFrames = action.allFrames || [];
+                    
+                    const viewportStart = Math.floor(visibleRange.start);
+                    const viewportEnd = Math.ceil(visibleRange.end);
+
+                    let color = "#999";
+                    if (track.type === "text") color = "lightblue";
+                    if (track.type === "audio") color = "lightgreen";
+                    if (track.type === "image") color = "orange";
+                    if (track.type === "video") color = "#4a5568";
+                     if (track.type === "secondvideo") color = "#8b5cf6"; 
+                    return (
+                      <Group key={action.id} x={actionX} y={4}>
+                        <Rect
+                          x={0}
+                          y={0}
+                          width={actionW}
+                          height={trackHeight - 10}
+                          fill={color}
+                          opacity={0.6}
+                          cornerRadius={4}
+                          stroke="#fff"
+                          strokeWidth={1}
+                          listening={false}
+                        />
+
+                        {track.type === "text" && (
+                          <>
+                            <Circle
+                              x={actionW - 10}
+                              y={8}
+                              radius={6}
+                              fill="red"
+                              onClick={() => onDeleteAction(track.id, action.id)}
+                            />
+                            <Text
+                              x={actionW - 13}
+                              y={4}
+                              text="×"
+                              fontSize={12}
+                              fill="#fff"
+                              onClick={() => onDeleteAction(track.id, action.id)}
+                            />
+                          </>
+                        )}
+
+                        {track.type === "text" && action.text && (
+                          <Text
+                            x={5}
+                            y={(trackHeight - 10) / 2 - 6}
+                            text={action.text}
+                            fontSize={12}
+                            fill="#fff"
+                            listening={false}
+                          />
+                        )}
+
+                        {track.type === "video" && allFrames.length > 0 && (
+                          <>
+                            {allFrames.map((frameSrc, frameIndex) => {
+                              const absoluteTime = frameIndex;
+                              
+                              if (absoluteTime < viewportStart || absoluteTime > viewportEnd) {
+                                return null;
+                              }
+                              
+                              const frameX = (absoluteTime - start) * FRAME_WIDTH;
+                              
+                              if (frameX < 0 || frameX >= actionW) {
+                                return null;
+                              }
+
+                              return (
+                                <Frame
+                                  key={`${action.id}-frame-${frameIndex}`}
+                                  src={frameSrc}
+                                  x={frameX}
+                                  y={0}
+                                  w={FRAME_WIDTH}
+                                  h={trackHeight - 10}
+                                  absoluteTime={absoluteTime}
+                                  frameIndex={frameIndex}
+                                  razorMode={razorMode}
+                                  onTimeChange={onTimeChange}
+                                  videoRef={videoRef}
+                                />
+                              );
+                            })}
+                          </> 
+                        )} 
+                      </Group>
+                    );
+                  })}
+                </Group>
+              );
+            })}
+            
+            {/* Clips visualization */}
+            {clips.map(clip => {
+              const videoTrackIndex = tracks.findIndex(t => t.type === "video");
+              if (videoTrackIndex === -1) return null;
+              
+              const trackY = videoTrackIndex * trackHeight + 30;
+              
+              return (
+                <Group key={clip.id}>
+                  <Rect
+                    x={clip.start * PIXELS_PER_SECOND}
+                    y={trackY + 4}
+                    width={(clip.end - clip.start) * PIXELS_PER_SECOND}
+                    height={trackHeight - 10}
+                    fill="transparent"
+                    stroke="#00ff00"
+                    strokeWidth={2}
+                    dash={[5, 5]}
+                    listening={false}
+                  />
+                  <Line
+                    points={[
+                      clip.start * PIXELS_PER_SECOND, trackY,
+                      clip.start * PIXELS_PER_SECOND, trackY + trackHeight
+                    ]}
+                    stroke="#ff0000"
+                    strokeWidth={2}
+                    listening={false}
+                  />
+                </Group>
+              );
+            })}
+          </Layer>
+        </Stage>
+      </div>         
     </div>
-  );
+    
+    {/* Context Menu */}
+    // Update the context menu rendering in TimelineKonva.jsx
+{contextMenu && (
+  <div
+    ref={menuRef}
+    style={{
+      position: "fixed",
+      top: contextMenu.y,
+      left: contextMenu.x,
+      background: "#1b1b1b",
+      border: "1px solid #444",
+      borderRadius: 6,
+      padding: 6,
+      zIndex: 9999,
+      width: 180,
+      boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
+    }}
+    onMouseDown={(e) => e.stopPropagation()}
+  >
+    {contextMenu.trackType === 'secondvideo' ? (
+      // Second video menu options
+      [
+        { label: "🗑 Remove Second Video", action: "remove" },
+      ].map((item) => (
+        <div
+          key={item.action}
+          style={{
+            padding: "8px 12px",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "13px",
+            borderRadius: "4px",
+            transition: "background 0.15s"
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "#333"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+          onClick={() => {
+            onSecondVideoTrackAction?.(item.action, contextMenu.trackId);
+            setContextMenu(null);
+          }}
+        >
+          {item.label}
+        </div>
+      ))
+    ) : (
+      // Audio track menu options (existing)
+      [
+        { label: "🔇 Mute", action: "mute" },
+        { label: "🎵 Keep Video Audio", action: "keep" },
+        { label: "🔁 Replace,Added Audio", action: "replaceMode" },
+        { label: "🎚 Mix Both", action: "mix" },
+        { label: "🗑 Delete Track", action: "delete" },
+      ].map((item) => (
+        <div
+          key={item.action}
+          style={{
+            padding: "8px 12px",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "13px",
+            borderRadius: "4px",
+            transition: "background 0.15s"
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "#333"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+          onClick={() => {
+            onAudioTrackAction?.(item.action, contextMenu.trackId);
+            setContextMenu(null);
+          }}
+        >
+          {item.label}
+        </div>
+      ))
+    )}
+  </div>
+)}
+  </div>
+);
 };
 
 export default TimelineKonva;
