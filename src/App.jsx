@@ -26,10 +26,10 @@
               externalAudioFilename: null
             });
 
-      const [secondVideoFile, setSecondVideoFile] = useState(null);
-      const [secondVideoSrc, setSecondVideoSrc] = useState(null);
-      const [isProcessingSplitScreen, setIsProcessingSplitScreen] = useState(false);
-      const secondVideoInputRef = useRef(null);
+    const [secondVideoFile, setSecondVideoFile] = useState(null);
+    const [secondVideoSrc, setSecondVideoSrc] = useState(null);
+    const [isProcessingSplitScreen, setIsProcessingSplitScreen] = useState(false);
+    const secondVideoInputRef = useRef(null);
     const [splitMode, setSplitMode] = useState(false); 
     const [serverFilename, setServerFilename] = useState(null);
     const [mergedVideos, setMergedVideos] = useState([]);
@@ -50,6 +50,19 @@
     const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
     const [razorMode, setRazorMode] = useState(false);
     const [cuts, setCuts] = useState([]);
+    const [mainVideoSource, setMainVideoSource] = useState(null);
+    const [mainVideoSrc, setMainVideoSrc] = useState(null);
+    const [videoOverlays, setVideoOverlays] = useState([]);
+    const [selectedVideoOverlay, setSelectedVideoOverlay] = useState(null);
+    const [insertVideos, setInsertVideos] = useState([]);
+    const [isProcessingInsert, setIsProcessingInsert] = useState(false); 
+    const [imageOverlays, setImageOverlays] = useState([]);
+    const [selectedImageOverlay, setSelectedImageOverlay] = useState(null);
+    const [isProcessingImages, setIsProcessingImages] = useState(false);
+    const imageOverlayInputRef = useRef(null);
+    
+
+
     // Refs
     const audioInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -60,6 +73,9 @@
     const addedAudioRef = useRef();
     const audioEngineRef = useRef(null);
     const addedAudioFileRef = useRef(null);
+    const secondVideoRef = useRef(null);
+    const isUploadingSecondVideoRef = useRef(false);
+    const videoOverlayInputRef = useRef(null);
 
     const PIXELS_PER_SECOND = 10;
     const timelineWidth = videoDuration * PIXELS_PER_SECOND;
@@ -71,7 +87,8 @@
     };
 
     const DEFAULT_VIDEO = "/default.mp4";
-    const activeVideoSrc = selectedVideoSrc || blobUrl || videoSrc || DEFAULT_VIDEO;
+    //const activeVideoSrc = selectedVideoSrc || blobUrl || videoSrc || DEFAULT_VIDEO;
+   const activeVideoSrc = mainVideoSource  || videoSrc  || DEFAULT_VIDEO;
 
     // ------------------- FILE UPLOAD -------------------
     const maxFileSizeMB = 200 * 1024 * 1024;
@@ -83,12 +100,22 @@
         return alert("File is too large. Please select a file under 200MB.");
       }
 
-      if (blobUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(blobUrl);
+      if (splitMode && secondVideoFile) {
+        console.warn("⚠️ Attempting to upload main video while in split mode!");
+        console.warn("This might be a bug - check what triggered this");
       }
 
+      if (!splitMode && !isUploadingSecondVideoRef.current) {
+          if (blobUrl?.startsWith("blob:")) {
+            console.log("🗑️ Revoking old blobUrl:", blobUrl);
+            URL.revokeObjectURL(blobUrl);
+          }
+        } else {
+          console.log("🛡️ Skipping blob revocation (split mode active or second video uploading)");
+        }
+
       const url = URL.createObjectURL(file);
-      setBlobUrl(url);
+      setMainVideoSource(url);
       setFile(file);
 
       const formData = new FormData();
@@ -104,7 +131,8 @@
         })
         .then((data) => {
           setServerFilename(data.filename);
-          setVideoSrc(`/stream/${data.filename}`);
+          setMainVideoSrc(`/stream/${data.filename}`);
+          setMainVideoSource(url);
         })
         .catch((err) => {
           console.error("Video upload failed:", err);
@@ -115,7 +143,9 @@
     // ------------------- TIMELINE STATE -------------------
     const [tracks, setTracks] = useState([
       { id: "video-main", type: "video", actions: [] },
+      { id: "track-video-overlay", type: "videooverlay", actions: [] },
       { id: "track-text", type: "text", actions: [] },
+       { id: "track-image", type: "image", actions: [] },
       { id: "track-audio", type: "audio", actions: [] },
       { id: "track-secondvideo", type: "secondvideo", actions: [] }, 
     ]);
@@ -412,6 +442,10 @@
     const handleOnVideoUpload = async (file) => {
       setIsLoadingFrames(true);
 
+      if (splitMode && secondVideoFile) {
+    console.warn("⚠️ Uploading main video while in split mode!");
+  }
+
       try {
         const formData = new FormData();
         formData.append("file", file);
@@ -526,9 +560,16 @@
     };
 
     const handleAddVideoRequest = (trackId) => {
-      setPendingVideoTrack(trackId);
-      videoInputRef.current?.click();
-    };
+        // ✅ Prevent replacing main video if it already exists
+        const videoTrack = tracks.find(t => t.id === trackId);
+        if (videoTrack?.actions?.length > 0) {
+          console.log('⚠️ Main video already exists, ignoring button click');
+          return;
+        }
+        
+        setPendingVideoTrack(trackId);
+        videoInputRef.current?.click();
+      };
 
     // ------------------- VIDEO TIME UPDATE -------------------
     useEffect(() => {
@@ -543,13 +584,7 @@
       return () => video.removeEventListener("timeupdate", onTimeUpdate);
     }, []);
 
-    useEffect(() => {
-      return () => {
-        if (blobUrl?.startsWith("blob:")) {
-          URL.revokeObjectURL(blobUrl);
-        }
-      };
-    }, [blobUrl]);
+    
 
     // ✅ FIX #2: Improved viewport calculation with proper bounds
     useEffect(() => {
@@ -1012,79 +1047,136 @@
     
   //----------------- Split Screen - Bottom Area-----------------//
     
-    const handleSecondVideoUpload = async (file) => {
-    if (!file) return;
+    useEffect(() => {
+      // ✅ Only run on TRUE unmount
+      return () => {
+        // Check if component is actually being removed from DOM
+        const isUnmounting = !document.body.contains(videoRef.current);
+        
+        if (isUnmounting && !splitMode && !isUploadingSecondVideoRef.current) {
+          if (blobUrl?.startsWith("blob:")) {
+            console.log("🗑️ Revoking blobUrl on unmount:", blobUrl);
+            URL.revokeObjectURL(blobUrl);
+          }
+          if (mainVideoSource?.startsWith("blob:") && mainVideoSource !== blobUrl) {
+            console.log("🗑️ Revoking mainVideoSource on unmount:", mainVideoSource);
+            URL.revokeObjectURL(mainVideoSource);
+          }
+        } else {
+          console.log("🛡️ Cleanup skipped - component still mounted");
+        }
+      };
+    }, []);                //[blobUrl, mainVideoSource, splitMode]);
 
-    if (file.size > maxFileSizeMB) {
-      return alert("File is too large. Please select a file under 200MB.");
+  const handleSecondVideoUpload = async (file) => {
+  if (!file) return;
+
+  if (file.size > maxFileSizeMB) {
+    return alert("File is too large. Please select a file under 200MB.");
+  }
+
+  console.log("🎬 Starting SECOND video upload (should NOT affect main video)");
+  console.log("📊 Main video state BEFORE second upload:", {
+    mainVideoSource,
+    blobUrl,
+    videoSrc,
+    serverFilename
+  });
+  
+  isUploadingSecondVideoRef.current = true;
+  setIsLoadingFrames(true);
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:8000/upload/local", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Server responded with ${res.status}`);
     }
 
-    setIsLoadingFrames(true);
+    const data = await res.json();
+    console.log("Second video uploaded to server:", data);
 
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
+    // ✅ Create blob URL for SECOND video only
+    const url = URL.createObjectURL(file); 
 
-      const res = await fetch("http://localhost:8000/upload/local", {
-        method: "POST",
-        body: formData,
-      });
+    // ✅ CRITICAL: Set ONLY second video states
+    setSecondVideoFile(file);
+    setSecondVideoSrc(url);  // ✅ This should be the ONLY source update
 
-      if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`);
-      }
+    console.log("📊 Second video blob created:", url);
+    console.log("📊 Main video state AFTER (should be unchanged):", {
+      mainVideoSource,
+      blobUrl,
+      videoSrc,
+      serverFilename
+    });
+    
+    // Update split-screen config
+    setSplitScreenConfig(prev => ({
+      ...prev,
+      enabled: true,
+      bottomVideoFilename: data.filename
+    }));
+    console.log("✅ Split mode already enabled (prevents blob cleanup)");
 
-      const data = await res.json();
-      console.log("Second video uploaded:", data);
+    // Enable split mode
+    setSplitMode(true);
+    console.log("✅ Split mode enabled");
 
-      const url = URL.createObjectURL(file);
-      setSecondVideoFile(file);
-      setSecondVideoSrc(url);
+    // Add to secondvideo track with frames
+    const duration = data.thumbnails?.length || 0;
 
-      // Update split-screen config
-      setSplitScreenConfig(prev => ({
-        ...prev,
-        enabled: true,
-        bottomVideoFilename: data.filename
-      }));
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === "track-secondvideo"
+          ? {
+              ...track,
+              actions: [
+                {
+                  id: "secondvideo-main",
+                  start: 0,
+                  end: duration,
+                  allFrames: data.thumbnails || [],
+                  frames: (data.thumbnails || []).slice(0, 30),
+                  filename: data.filename,
+                  src: url,
+                },
+              ],
+            }
+          : track
+      )
+    );
 
-      // Add to secondvideo track with frames
-      const duration = data.thumbnails?.length || 0;
-
-      setTracks((prev) =>
-        prev.map((track) =>
-          track.id === "track-secondvideo"
-            ? {
-                ...track,
-                actions: [
-                  {
-                    id: "secondvideo-main",
-                    start: 0,
-                    end: duration,
-                    allFrames: data.thumbnails || [],
-                    frames: (data.thumbnails || []).slice(0, 30),
-                    filename: data.filename,
-                    src: url,
-                  },
-                ],
-              }
-            : track
-        )
-      );
-
-      console.log("✅ Second video added to track");
-    } catch (err) {
-      console.error("Second video upload failed:", err);
-      alert("Failed to upload second video: " + err.message);
-    } finally {
-      setIsLoadingFrames(false);
-    }
-  };
+    console.log("✅ Second video added to track (main video should still be intact)");
+    
+  } catch (err) {
+    console.error("Second video upload failed:", err);
+    alert("Failed to upload second video: " + err.message);
+    setSplitMode(false);
+  } finally {
+    setIsLoadingFrames(false);
+    isUploadingSecondVideoRef.current = false;
+  }
+};
 
   // Handler for second video file input
   const handleSecondVideoFileSelect = (e) => {
+    
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+    // User cancelled - unblock cleanup
+    console.log("❌ File selection cancelled, disabling protection");
+    isUploadingSecondVideoRef.current = false;
+    return;
+  }
 
     handleSecondVideoUpload(file);
     e.target.value = "";
@@ -1160,7 +1252,7 @@
 
     setSecondVideoFile(null);
     setSecondVideoSrc(null);
-
+    setSplitMode(false); 
     setSplitScreenConfig({
       enabled: false,
       topVideoFilename: null,
@@ -1238,6 +1330,7 @@
 
   const handleAddSecondVideoRequest = (trackId) => {
     console.log("📹 Second video request for track:", trackId);
+    isUploadingSecondVideoRef.current = true;
     secondVideoInputRef.current?.click();
   };
 
@@ -1249,6 +1342,649 @@
       handleRemoveSecondVideo();
     }
   };
+
+  //----insert Video clipls on main video  
+
+// Handler to add a video overlay (Picture-in-Picture)
+const handleAddVideoOverlay = async (file, startTime = 0) => {
+  if (!file || !file.type.startsWith('video/')) {
+    alert("Please select a valid video file");
+    return;
+  }
+
+  console.log("📹 Adding video overlay:", file.name);
+  
+  try {
+    // Create blob URL for preview
+    const url = URL.createObjectURL(file);
+    
+    // Upload to server for processing
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:8000/upload/local", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const data = await res.json();
+    console.log("✅ Video overlay uploaded:", data.filename);
+
+    // Get video metadata
+    const video = document.createElement('video');
+    video.src = url;
+    
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
+    });
+
+    const duration = video.duration;
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Calculate default overlay size (25% of main video)
+    const defaultWidth = (videoWidthPx || 640) * 0.25;
+    const defaultHeight = (defaultWidth / videoWidth) * videoHeight;
+
+    // Create new overlay object
+    const newOverlay = {
+      id: Date.now().toString(),
+      type: 'video',
+      src: url,
+      serverFilename: data.filename,
+      start: startTime,
+      end: startTime + duration,
+      duration: duration,
+      position: { 
+        x: (videoWidthPx || 640) - defaultWidth - 20, // Bottom right corner
+        y: (videoHeightPx || 360) - defaultHeight - 20 
+      },
+      size: { 
+        width: defaultWidth, 
+        height: defaultHeight 
+      },
+      opacity: 1,
+      zIndex: videoOverlays.length + 1,
+      volume: 0.5, // Default volume for overlay video
+      transform: {
+        rotation: 0,
+        scale: 1,
+      },
+    };
+
+    setVideoOverlays(prev => [...prev, newOverlay]);
+    setSelectedVideoOverlay(newOverlay);
+
+    // Add to timeline track
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === "track-video-overlay" // We'll create this track
+          ? {
+              ...track,
+              actions: [
+                ...track.actions,
+                {
+                  id: newOverlay.id,
+                  start: newOverlay.start,
+                  end: newOverlay.end,
+                  src: url,
+                  filename: data.filename,
+                },
+              ],
+            }
+          : track
+      )
+    );
+
+    console.log("✅ Video overlay added successfully");
+    
+    // Cleanup
+    URL.revokeObjectURL(video.src);
+
+  } catch (err) {
+    console.error("Failed to add video overlay:", err);
+    alert("Failed to add video overlay: " + err.message);
+  }
+};
+
+// Update video overlay properties
+const handleUpdateVideoOverlay = (overlayId, updates) => {
+  console.log("🔧 Updating video overlay:", overlayId, updates);
+  
+  setVideoOverlays(prev =>
+    prev.map(overlay =>
+      overlay.id === overlayId
+        ? { ...overlay, ...updates }
+        : overlay
+    )
+  );
+
+  // Update selected overlay if it's the one being updated
+  setSelectedVideoOverlay(prev =>
+    prev && prev.id === overlayId
+      ? { ...prev, ...updates }
+      : prev
+  );
+
+  // Update timeline track
+  setTracks(prev =>
+    prev.map(track =>
+      track.id === "track-video-overlay"
+        ? {
+            ...track,
+            actions: track.actions.map(action =>
+              action.id === overlayId
+                ? { ...action, ...updates }
+                : action
+            ),
+          }
+        : track
+    )
+  );
+};
+
+// Delete video overlay
+const handleDeleteVideoOverlay = (overlayId) => {
+  console.log("🗑️ Deleting video overlay:", overlayId);
+  
+  // Find and revoke blob URL
+  const overlay = videoOverlays.find(o => o.id === overlayId);
+  if (overlay && overlay.src?.startsWith("blob:")) {
+    URL.revokeObjectURL(overlay.src);
+  }
+
+  setVideoOverlays(prev => prev.filter(o => o.id !== overlayId));
+  
+  if (selectedVideoOverlay?.id === overlayId) {
+    setSelectedVideoOverlay(null);
+  }
+
+  // Remove from timeline track
+  setTracks(prev =>
+    prev.map(track =>
+      track.id === "track-video-overlay"
+        ? {
+            ...track,
+            actions: track.actions.filter(a => a.id !== overlayId),
+          }
+        : track
+    )
+  );
+};
+
+// Handler for timeline updates
+const handleVideoOverlayTimelineChange = (overlayId, newStart, newEnd) => {
+  handleUpdateVideoOverlay(overlayId, {
+    start: newStart,
+    end: newEnd,
+  });
+};
+
+// ------------------- EXPORT VIDEO OVERLAYS -------------------
+const handleExportVideoOverlays = async () => {
+  if (!serverFilename) {
+    alert("⚠️ Please upload the main video first");
+    return;
+  }
+
+  if (videoOverlays.length === 0) {
+    alert("⚠️ No video overlays to export");
+    return;
+  }
+
+  try {
+    setIsProcessing(true);
+
+    // Convert videoOverlays to backend format
+    const inserts = videoOverlays.map(overlay => ({
+      insert_filename: overlay.serverFilename,
+      start_time: overlay.start,
+      end_time: overlay.end,
+      x: Math.round(overlay.position.x),
+      y: Math.round(overlay.position.y),
+      width: Math.round(overlay.size.width),
+      height: Math.round(overlay.size.height),
+      opacity: overlay.opacity,
+      volume: overlay.volume || 0.5,
+      z_index: overlay.zIndex,
+      fade_in: 0.3,
+      fade_out: 0.3,
+      loop: false
+    }));
+
+    console.log("📤 Sending video overlay request:", {
+      main_video: serverFilename,
+      inserts_count: inserts.length
+    });
+
+    const response = await fetch("http://localhost:8000/video/add-multiple-inserts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        main_video: serverFilename,
+        inserts: inserts,
+        keep_main_audio: true,
+        mix_insert_audio: false
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to add video overlays");
+    }
+
+    const data = await response.json();
+    console.log("✅ Video overlays added:", data);
+
+    // Update video source
+    setVideoSrc(data.video_url);
+    setServerFilename(data.output);
+
+    alert(`✅ ${data.inserts_count} video overlay(s) added successfully!`);
+    loadVideosForMerge();
+
+  } catch (err) {
+    console.error("Video overlay export error:", err);
+    alert("❌ Failed to export video overlays: " + err.message);
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+
+// ==================== VIDEO INSERT AT POSITION ====================
+ 
+
+// Add insert video to list
+const handleAddInsertVideo = async (file, position) => {
+  if (!file || !file.type.startsWith('video/')) {
+    alert("Please select a valid video file");
+    return;
+  }
+
+  try {
+    // Upload to server
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:8000/upload/local", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const data = await res.json();
+    console.log("✅ Insert video uploaded:", data.filename);
+
+    // Get video duration
+    const video = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
+    });
+
+    const duration = video.duration;
+    URL.revokeObjectURL(url);
+
+    // Add to insert list
+    const newInsert = {
+      id: Date.now().toString(),
+      filename: data.filename,
+      position: position || 0,
+      duration: duration,
+      name: file.name
+    };
+
+    setInsertVideos(prev => [...prev, newInsert]);
+    
+    alert(`✅ Insert video added at ${position}s (${duration.toFixed(2)}s duration)`);
+
+  } catch (err) {
+    console.error("Failed to add insert video:", err);
+    alert("Failed to add insert video: " + err.message);
+  }
+};
+
+// Export with inserts
+const handleExportWithInserts = async () => {
+  if (!serverFilename) {
+    alert("⚠️ Please upload the main video first");
+    return;
+  }
+
+  if (insertVideos.length === 0) {
+    alert("⚠️ No insert videos added");
+    return;
+  }
+
+  try {
+    setIsProcessingInsert(true);
+
+    const payload = {
+      main_video: serverFilename,
+      inserts: insertVideos.map(ins => ({
+        filename: ins.filename,
+        position: ins.position
+      }))
+    };
+
+    console.log("📤 Sending insert request:", payload);
+
+    const response = await fetch("http://localhost:8000/video/insert-at-position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Insert failed");
+    }
+
+    const data = await response.json();
+    console.log("✅ Video insert complete:", data);
+
+    // Update video source
+    setVideoSrc(data.video_url);
+    setServerFilename(data.output);
+
+    alert(
+      `✅ Insert successful!\n\n` +
+      `Original: ${data.original_duration.toFixed(2)}s\n` +
+      `Final: ${data.final_duration.toFixed(2)}s\n` +
+      `Added: ${(data.final_duration - data.original_duration).toFixed(2)}s`
+    );
+
+    // Clear insert list
+    setInsertVideos([]);
+    loadVideosForMerge();
+
+  } catch (err) {
+    console.error("Insert error:", err);
+    alert("❌ Failed to insert videos: " + err.message);
+  } finally {
+    setIsProcessingInsert(false);
+  }
+};
+
+// Update insert position
+const handleUpdateInsertPosition = (id, newPosition) => {
+  setInsertVideos(prev =>
+    prev.map(ins =>
+      ins.id === id
+        ? { ...ins, position: Math.max(0, Math.min(newPosition, videoDuration)) }
+        : ins
+    )
+  );
+};
+
+// Remove insert
+const handleRemoveInsert = (id) => {
+  setInsertVideos(prev => prev.filter(ins => ins.id !== id));
+};
+
+
+
+// ==================== IMAGE OVERLAY HANDLERS ====================
+
+// Add image overlay
+
+const handleAddImageRequest = (trackId) => {
+  console.log('🖼️ Image request for track:', trackId);
+  imageOverlayInputRef.current?.click();
+};
+
+const handleAddImageOverlay = async (file, startTime = 0) => {
+  if (!file || !file.type.startsWith('image/')) {
+    alert("Please select a valid image file");
+    return;
+  }
+
+  console.log("🖼️ Adding image overlay:", file.name);
+  
+  try {
+    // Upload to server
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:8000/upload/local", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const data = await res.json();
+    console.log("✅ Image uploaded:", data.filename);
+
+    // Create blob URL for preview
+    const url = URL.createObjectURL(file);
+    
+    // Get image dimensions
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+
+    // Calculate default size (20% of video width)
+    const defaultWidth = (videoWidthPx || 640) * 0.2;
+    const defaultHeight = (defaultWidth / img.width) * img.height;
+
+    // Create new image overlay
+    const newOverlay = {
+      id: Date.now().toString(),
+      type: 'image',
+      src: url,
+      serverFilename: data.filename,
+      start: startTime,
+      end: startTime + 5, // Default 5 second display
+      position: { 
+        x: 20, // Top left corner
+        y: 20 
+      },
+      size: { 
+        width: defaultWidth, 
+        height: defaultHeight 
+      },
+      opacity: 1,
+      fadeIn: 0.3,
+      fadeOut: 0.3,
+      originalWidth: img.width,
+      originalHeight: img.height,
+    };
+
+    setImageOverlays(prev => [...prev, newOverlay]);
+    setSelectedImageOverlay(newOverlay);
+
+    // ✅ Add to timeline track with FULL overlay data
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === "track-image"
+          ? {
+              ...track,
+              actions: [
+                ...track.actions,
+                {
+                  ...newOverlay, // ✅ Include ALL overlay properties
+                  filename: data.filename,
+                },
+              ],
+            }
+          : track
+      )
+    );
+
+    console.log("✅ Image overlay added successfully");
+
+  } catch (err) {
+    console.error("Failed to add image overlay:", err);
+    alert("Failed to add image overlay: " + err.message);
+  }
+};
+ 
+// Update image overlay properties
+const handleUpdateImageOverlay = (overlayId, updates) => {
+  console.log("🔧 Updating image overlay:", overlayId, updates);
+  
+  // ✅ Update imageOverlays state
+  setImageOverlays(prev =>
+    prev.map(overlay =>
+      overlay.id === overlayId
+        ? { ...overlay, ...updates }
+        : overlay
+    )
+  );
+
+  // ✅ Update selected overlay
+  setSelectedImageOverlay(prev =>
+    prev && prev.id === overlayId
+      ? { ...prev, ...updates }
+      : prev
+  );
+
+  // ✅ CRITICAL: Also update tracks with the full overlay data
+  setTracks(prev =>
+    prev.map(track =>
+      track.id === "track-image"
+        ? {
+            ...track,
+            actions: track.actions.map(action => {
+              if (action.id !== overlayId) return action;
+              
+              // Get the current overlay from imageOverlays
+              const currentOverlay = imageOverlays.find(o => o.id === overlayId);
+              if (!currentOverlay) return action;
+              
+              // Merge updates with current overlay data
+              const updatedOverlay = { ...currentOverlay, ...updates };
+              
+              return {
+                ...action,
+                start: updatedOverlay.start,
+                end: updatedOverlay.end,
+                position: updatedOverlay.position,
+                size: updatedOverlay.size,
+                opacity: updatedOverlay.opacity,
+                // Store the full overlay data in the action
+                type: 'image',
+                ...updates
+              };
+            }),
+          }
+        : track
+    )
+  );
+};
+
+// Delete image overlay
+const handleDeleteImageOverlay = (overlayId) => {
+  console.log("🗑️ Deleting image overlay:", overlayId);
+  
+  // Find and revoke blob URL
+  const overlay = imageOverlays.find(o => o.id === overlayId);
+  if (overlay && overlay.src?.startsWith("blob:")) {
+    URL.revokeObjectURL(overlay.src);
+  }
+
+  setImageOverlays(prev => prev.filter(o => o.id !== overlayId));
+  
+  if (selectedImageOverlay?.id === overlayId) {
+    setSelectedImageOverlay(null);
+  }
+
+  // Remove from timeline track
+  setTracks(prev =>
+    prev.map(track =>
+      track.id === "track-image"
+        ? {
+            ...track,
+            actions: track.actions.filter(a => a.id !== overlayId),
+          }
+        : track
+    )
+  );
+};
+
+// Export with image overlays
+const handleExportImageOverlays = async () => {
+  if (!serverFilename) {
+    alert("⚠️ Please upload the main video first");
+    return;
+  }
+
+  if (imageOverlays.length === 0) {
+    alert("⚠️ No image overlays to export");
+    return;
+  }
+
+  try {
+    setIsProcessingImages(true);
+
+    // Convert imageOverlays to backend format
+    const overlays = imageOverlays.map(overlay => ({
+      image_filename: overlay.serverFilename,
+      start: overlay.start,
+      end: overlay.end,
+      x: Math.round(overlay.position.x),
+      y: Math.round(overlay.position.y),
+      width: Math.round(overlay.size.width),
+      height: Math.round(overlay.size.height),
+      opacity: overlay.opacity,
+      fade_in: overlay.fadeIn || 0,
+      fade_out: overlay.fadeOut || 0,
+    }));
+
+    console.log("📤 Sending image overlay request:", {
+      filename: serverFilename,
+      overlays_count: overlays.length
+    });
+
+    const response = await fetch("http://localhost:8000/video/add-image-overlays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: serverFilename,
+        overlays: overlays
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to add image overlays");
+    }
+
+    const data = await response.json();
+    console.log("✅ Image overlays added:", data);
+
+    // Update video source
+    setVideoSrc(data.video_url);
+    setServerFilename(data.output);
+
+    alert(`✅ ${data.overlays_count} image overlay(s) added successfully!`);
+    loadVideosForMerge();
+
+  } catch (err) {
+    console.error("Image overlay export error:", err);
+    alert("❌ Failed to export image overlays: " + err.message);
+  } finally {
+    setIsProcessingImages(false);
+  }
+};
 
     // ------------------- RENDER -------------------
     return (
@@ -1286,18 +2022,18 @@
             </div>
           )}
 
-          {!splitMode && (
+          {!splitMode && (  
             <div style={{ position: "relative", width: videoWidthPx || 640,display: "inline-block" }}>
             <VideoPlayer
-              key={activeVideoSrc}
+              //key={activeVideoSrc}
               ref={videoRef}
               src={activeVideoSrc}
               muted={false}
               width={videoWidthPx || 640}
               height={videoHeightPx || 440}
               controls
-              preload="auto"
-              style = {{zIndex: 1}}
+              preload="auto" 
+              style = {{zIndex: 1,ObjectFit:"contain",background: "#000"}}
               onLoadedMetadata={(e) => {
                 setDuration(e.target.duration);
                 setVideoWidthPx(e.target.videoWidth);
@@ -1327,8 +2063,9 @@
                       left: 0,
                       width: videoWidthPx || 640,
                       height: videoHeightPx || 440,
-                      pointerEvents: selectedAction ? "auto" : "none",
-                      zIndex: 10,
+                      pointerEvents: "auto",
+                      // pointerEvents: selectedAction ? "auto" : "none",
+                      zIndex: 5,
                     }}
                   >
                     {videoWidthPx > 0 && videoHeightPx > 0 && (
@@ -1340,48 +2077,162 @@
                         selectedActionId={selectedAction?.id}
                         setSelectedActionId={setSelectedActionById}
                         onUpdateAction={handleUpdateAction}
+                        currentTime={currentTime}
+                        imageOverlays={imageOverlays} 
+                        onUpdateImageOverlay={handleUpdateImageOverlay}
                       />
                     )}
                   </div>
                 )} 
-        {splitMode && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                width: videoWidthPx || 640,
-                gap: 8,
-                position: "relative"   // important: keep normal flow
-              }}
-            >
-              {/* TOP VIDEO */}
-              <video
-                ref={videoRef}
-                src={videoSrc}
-                controls
-                muted={false}
-                style={{
-                  width: "100%",
-                  height: 220,
-                  display: "block"
-                }}
-              />
+       {splitMode && (
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      width: videoWidthPx || 640,
+      gap: 8,
+      position: "relative",
+      background: "#000"
+    }}
+  >
+    {/* TOP VIDEO - Main Video */}
+    <div style={{ position: "relative", background: "#1a1a1a" }}>
+      <div style={{ 
+        color: "#fff", 
+        fontSize: 12, 
+        margin: 0, 
+        padding: "5px 10px",
+        background: "#3b82f6",
+        fontWeight: "bold"
+      }}>
+        🔝 Top Video {serverFilename && `(${serverFilename})`}
+      </div>
+      <video
+        ref={videoRef}
+        // ✅ CRITICAL: Use explicit source priority
+        src={mainVideoSource || blobUrl || videoSrc}
+        controls
+        muted={false}
+        autoPlay={false}
+        playsInline
+        onLoadedMetadata={(e) => {
+          console.log("✅ Top video loaded in split mode:", {
+            src: e.target.src,
+            currentSrc: e.target.currentSrc,
+            duration: e.target.duration,
+            readyState: e.target.readyState
+          });
+          setDuration(e.target.duration);
+          setVideoWidthPx(e.target.videoWidth);
+          setVideoHeightPx(e.target.videoHeight);
+          setVideoDuration(e.target.duration);
+        }}
+        onError={(e) => {
+          console.error("❌ Top video failed to load:", e);
+          console.log("📊 Available sources:", {
+            mainVideoSource,
+            blobUrl,
+            videoSrc,
+            serverFilename
+          });
+          // Try fallback sources
+          if (!mainVideoSource && videoSrc) {
+            console.log("🔄 Trying videoSrc as fallback");
+            e.target.src = videoSrc;
+          }
+        }}
+        onCanPlay={() => {
+          console.log("✅ Top video can play");
+        }}
+        style={{
+          width: "100%",
+          height: 220,
+          display: "block",
+          background: "#000",
+          objectFit: "contain",
+        }}
+      />
+    </div>
 
-              {/* BOTTOM VIDEO */}
-              {secondVideoSrc && (
-                <video
-                  src={secondVideoSrc}
-                  controls
-                  muted={false}
-                  style={{
-                    width: "100%",
-                    height: 220,
-                    display: "block"
-                  }}
-                />
-              )}
-            </div>
-          )}
+    {/* BOTTOM VIDEO - Second Video */}
+    {secondVideoSrc ? (
+      <div style={{ position: "relative", background: "#1a1a1a" }}>
+        <div style={{ 
+          color: "#fff", 
+          fontSize: 12, 
+          margin: 0, 
+          padding: "5px 10px",
+          background: "#8b5cf6",
+          fontWeight: "bold"
+        }}>
+          🔽 Bottom Video {splitScreenConfig.bottomVideoFilename && `(${splitScreenConfig.bottomVideoFilename})`}
+        </div>
+        <video
+          ref={secondVideoRef}
+          src={secondVideoSrc}
+          controls
+          muted={false}
+          autoPlay={false}
+          playsInline
+          onLoadedMetadata={(e) => {
+            console.log("✅ Bottom video loaded:", {
+              src: e.target.src,
+              currentSrc: e.target.currentSrc,
+              duration: e.target.duration,
+              readyState: e.target.readyState
+            });
+          }}
+          onError={(e) => {
+            console.error("❌ Bottom video failed to load:", e);
+            console.log("📊 Bottom video source:", secondVideoSrc);
+          }}
+          onCanPlay={() => {
+            console.log("✅ Bottom video can play");
+          }}
+          style={{
+            width: "100%",
+            height: 220,
+            display: "block",
+            background: "#000",
+            objectFit: "contain",
+          }}
+        />
+      </div>
+    ) : (
+      <div style={{ 
+        width: "100%", 
+        height: 220, 
+        background: "#374151",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        gap: 10,
+        color: "#9ca3af"
+      }}>
+        <p style={{ margin: 0, fontSize: 18 }}>⚠️ No bottom video loaded</p>
+        <p style={{ margin: 0, fontSize: 14 }}>Upload a second video to enable split-screen</p>
+      </div>
+    )}
+    
+    {/* Debug Info Panel */}
+    <div style={{
+      padding: 10,
+      background: "#1f2937",
+      borderRadius: 4,
+      fontSize: 11,
+      color: "#9ca3af",
+      fontFamily: "monospace"
+    }}>
+      <strong style={{ color: "#60a5fa" }}>🐛 Debug Info:</strong>
+      <div>Split Mode: {splitMode ? "✅ Active" : "❌ Inactive"}</div>
+      <div>Main Video Source: {mainVideoSource ? "✅ blob" : blobUrl ? "blob (fallback)" : videoSrc ? "stream" : "❌ MISSING"}</div>
+      <div>Bottom Video Source: {secondVideoSrc ? "✅ blob" : "❌ none"}</div>
+      <div>Server Filename: {serverFilename || "❌ none"}</div>
+      <div>Bottom Filename: {splitScreenConfig.bottomVideoFilename || "❌ none"}</div>
+    </div>
+  </div>
+  )}
         </div>
 
         <input
@@ -1448,6 +2299,15 @@
             clips={clips} 
             onAddSecondVideoRequest={handleAddSecondVideoRequest}
             onSecondVideoTrackAction={handleSecondVideoTrackAction}
+            onAddVideoOverlay={() => { console.log('🎬 onAddVideoOverlay called');
+              console.log('📎 Ref exists:', !!videoOverlayInputRef.current);
+              videoOverlayInputRef.current?.click()}}  
+            onDeleteVideoOverlay={handleDeleteVideoOverlay}
+            serverFilename={serverFilename}
+            handleAddInsertVideo={handleAddInsertVideo}
+            onAddImageRequest={handleAddImageRequest} 
+            onDeleteImageOverlay={handleDeleteImageOverlay} 
+
 
           />
         </div>
@@ -1752,14 +2612,361 @@
             accept="video/*"
             hidden
             onChange={handleSecondVideoFileSelect}
-          />
+                  />
 
-        <hr />
-        <h3>🧩 Merge Videos</h3>
-        <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
+            {/* Insert Video  overlay */}
+          <input
+          type="file"
+          ref={videoOverlayInputRef}
+          accept="video/*"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            handleAddVideoOverlay(file, currentTime);
+            e.target.value = "";
+          }}
+        />
+
+        {/* ==================== VIDEO OVERLAY EXPORT SECTION ==================== */}
+        {videoOverlays.length > 0 && (
+          <div style={{ 
+            marginTop: 30, 
+            padding: 20, 
+            background: "#2a2a2a", 
+            borderRadius: 8,
+            border: "2px solid #3b82f6"
+          }}>
+            <h3 style={{ color: "#60a5fa", marginTop: 0 }}>
+              📹 Video Overlays ({videoOverlays.length})
+            </h3>
+
+            <div style={{ marginBottom: 20 }}>
+              {videoOverlays.map((overlay, idx) => (
+                <div key={overlay.id} style={{
+                  padding: 10,
+                  marginBottom: 10,
+                  background: "#1f2937",
+                  borderRadius: 6,
+                  color: "#d1d5db",
+                  fontSize: 14
+                }}>
+                  <strong>Overlay {idx + 1}:</strong> {overlay.serverFilename}
+                  <br />
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                    Time: {overlay.start.toFixed(2)}s - {overlay.end.toFixed(2)}s | 
+                    Position: ({Math.round(overlay.position.x)}, {Math.round(overlay.position.y)}) | 
+                    Z-Index: {overlay.zIndex}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={handleExportVideoOverlays}
+              disabled={isProcessing || !serverFilename}
+              style={{
+                padding: "14px 28px",
+                fontSize: 16,
+                fontWeight: "bold",
+                background: isProcessing ? "#6b7280" : "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                cursor: isProcessing || !serverFilename ? "not-allowed" : "pointer",
+                opacity: isProcessing || !serverFilename ? 0.6 : 1,
+                transition: "all 0.2s",
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10
+              }}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader /> Processing Video Overlays...
+                </>
+              ) : (
+                "🎬 Export Video with Overlays"
+              )}
+            </button>
+
+            {!serverFilename && (
+              <p style={{ color: "#f59e0b", fontSize: 14, marginTop: 10 }}>
+                ⚠️ Upload main video first
+              </p>
+            )}
+          </div>
+        )}
+      {/* ==================== VIDEO INSERT SECTION ==================== */}
+<div style={{ 
+  marginTop: 30, 
+  padding: 20, 
+  background: "#2a2a2a", 
+  borderRadius: 8,
+  border: "2px solid #10b981"
+}}>
+  <h3 style={{ color: "#34d399", marginTop: 0 }}>
+    ➕ Insert Videos at Position (Extends Timeline)
+  </h3>
+
+  <div style={{ marginBottom: 20 }}>
+    <p style={{ color: "#d1d5db", fontSize: 14 }}>
+      Insert videos at specific positions in your main video. The timeline will extend to accommodate all inserts.
+    </p>
+    <p style={{ color: "#9ca3af", fontSize: 13, marginTop: 5 }}>
+      <strong>Example:</strong> 74s main video + 9s insert at 25s = 83s final video
+    </p>
+  </div>
+
+  {/* Add Insert Button */}
+  <div style={{ marginBottom: 20 }}>
+    <input
+      type="file"
+      accept="video/*"
+      hidden
+      id="insert-video-input"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
         
-      </div>
-    );
-  }
+        const position = prompt(
+          `Insert at what position? (0 - ${videoDuration.toFixed(2)}s)\n` +
+          `Current time: ${currentTime.toFixed(2)}s`,
+          currentTime.toFixed(2)
+        );
+        
+        if (position !== null) {
+          handleAddInsertVideo(file, parseFloat(position));
+        }
+        
+        e.target.value = "";
+      }}
+    />
+    
+    <button
+      onClick={() => document.getElementById('insert-video-input').click()}
+      disabled={!serverFilename}
+      style={{
+        padding: "12px 24px",
+        background: serverFilename ? "#10b981" : "#6b7280",
+        color: "white",
+        border: "none",
+        borderRadius: 6,
+        cursor: serverFilename ? "pointer" : "not-allowed",
+        fontWeight: "bold"
+      }}
+    >
+      ➕ Add Insert Video
+    </button>
+  </div>
+
+          {/* Insert List */}
+          {insertVideos.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <h4 style={{ color: "#9ca3af", marginBottom: 10 }}>
+                Insert Videos ({insertVideos.length})
+              </h4>
+              
+              {insertVideos
+                .sort((a, b) => a.position - b.position)
+                .map((insert, idx) => (
+                  <div
+                    key={insert.id}
+                    style={{
+                      padding: 12,
+                      marginBottom: 10,
+                      background: "#1f2937",
+                      borderRadius: 6,
+                      border: "1px solid #374151"
+                    }}
+                  >
+                    <div style={{ 
+                      display: "flex", 
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 8
+                    }}>
+                      <strong style={{ color: "#34d399" }}>
+                        #{idx + 1}: {insert.name}
+                      </strong>
+                      
+                      <button
+                        onClick={() => handleRemoveInsert(insert.id)}
+                        style={{
+                          padding: "4px 12px",
+                          background: "#ef4444",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 12
+                        }}
+                      >
+                        🗑️ Remove
+                      </button>
+                    </div>
+                    
+                    <div style={{ 
+                      fontSize: 13, 
+                      color: "#d1d5db",
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr",
+                      gap: "8px 12px"
+                    }}>
+                      <span>Position:</span>
+                      <input
+                        type="number"
+                        value={insert.position}
+                        onChange={(e) => handleUpdateInsertPosition(insert.id, parseFloat(e.target.value))}
+                        min={0}
+                        max={videoDuration}
+                        step={0.1}
+                        style={{
+                          padding: "4px 8px",
+                          background: "#374151",
+                          border: "1px solid #4b5563",
+                          borderRadius: 4,
+                          color: "#fff",
+                          width: 100
+                        }}
+                      />
+                      
+                      <span>Duration:</span>
+                      <span>{insert.duration.toFixed(2)}s</span>
+                      
+                      <span>Server File:</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>{insert.filename}</span>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* Export Button */}
+          <button
+            onClick={handleExportWithInserts}
+            disabled={isProcessingInsert || !serverFilename || insertVideos.length === 0}
+            style={{
+              padding: "14px 28px",
+              fontSize: 16,
+              fontWeight: "bold",
+              background: isProcessingInsert || !serverFilename || insertVideos.length === 0
+                ? "#6b7280"
+                : "#10b981",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              cursor: isProcessingInsert || !serverFilename || insertVideos.length === 0
+                ? "not-allowed"
+                : "pointer",
+              opacity: isProcessingInsert || !serverFilename || insertVideos.length === 0
+                ? 0.6
+                : 1,
+              transition: "all 0.2s",
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10
+            }}
+          >
+            {isProcessingInsert ? (
+              <>
+                <Loader /> Processing Inserts...
+              </>
+            ) : (
+              "🎬 Export Video with Inserts"
+            )}
+          </button>
+
+          {/* Status Messages */}
+          <div style={{ marginTop: 15 }}>
+            {!serverFilename && (
+              <p style={{ color: "#f59e0b", fontSize: 14, margin: "5px 0" }}>
+                ⚠️ Upload main video first
+              </p>
+            )}
+            
+            {serverFilename && insertVideos.length === 0 && (
+              <p style={{ color: "#9ca3af", fontSize: 14, margin: "5px 0" }}>
+                ℹ️ Add insert videos to extend your timeline
+              </p>
+            )}
+            
+            {serverFilename && insertVideos.length > 0 && (
+              <p style={{ color: "#34d399", fontSize: 14, margin: "5px 0" }}>
+                ✅ Ready to export! Final duration will be approximately{" "}
+                {(videoDuration + insertVideos.reduce((sum, ins) => sum + ins.duration, 0)).toFixed(2)}s
+              </p>
+            )}
+          </div>
+        </div>
+          {/* ==================== IMAGE OVERLAY SECTION ==================== */}
+
+          <input
+              type="file"
+              ref={imageOverlayInputRef}
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                handleAddImageOverlay(file, currentTime);
+                e.target.value = "";
+              }}
+            />
+          <div style={{ 
+            marginTop: 30, 
+            padding: 20, 
+            background: "#2a2a2a", 
+            borderRadius: 8,
+            border: "2px solid #f59e0b"
+          }}> 
+            {/* Export Button */}
+            <button
+              onClick={handleExportImageOverlays}
+              disabled={isProcessingImages || !serverFilename || imageOverlays.length === 0}
+              style={{
+                padding: "14px 28px",
+                fontSize: 16,
+                fontWeight: "bold",
+                background: isProcessingImages || !serverFilename || imageOverlays.length === 0
+                  ? "#6b7280"
+                  : "#f59e0b",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                cursor: isProcessingImages || !serverFilename || imageOverlays.length === 0
+                  ? "not-allowed"
+                  : "pointer",
+                opacity: isProcessingImages || !serverFilename || imageOverlays.length === 0
+                  ? 0.6
+                  : 1,
+                transition: "all 0.2s",
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10
+              }}
+            >
+              {isProcessingImages ? (
+                <>
+                  <Loader /> Processing Image Overlays...
+                </>
+              ) : (
+                "🎬 Export Video with Image Overlays"
+              )}
+            </button>  
+          </div>
+      <hr />
+      <h3>🧩 Merge Videos</h3>
+      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
+      
+    </div>
+  );
+}
 
   export default App;

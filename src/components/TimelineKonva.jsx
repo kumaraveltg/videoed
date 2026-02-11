@@ -20,6 +20,8 @@ const TimelineKonva = ({
   onAudioTrackAction,onSplit,clips = [],  razorMode,setRazorMode,
   onAddSecondVideoRequest,  
   onSecondVideoTrackAction,
+  onAddVideoOverlay,        
+  onDeleteVideoOverlay, serverFilename,handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest
 }) => {
   const stageRef = useRef();
   const PIXELS_PER_SECOND = 10;
@@ -220,6 +222,22 @@ const TimelineKonva = ({
       e.preventDefault();
       e.stopPropagation();
       
+      if (track.type === "videooverlay") {
+      // ✅ Check if there are any overlay actions first
+      if (track.actions && track.actions.length > 0) {
+        console.log('✅ Opening context menu from button (videooverlay)');
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          trackId: track.id,
+          trackType: 'videooverlay'
+        });
+      } else {
+        console.log('⚠️ No overlays yet, ignoring right-click');
+      }
+      return;  
+    }
+
       if (track.type === "audio") {
         console.log('✅ Opening context menu from button');
         setContextMenu({
@@ -228,8 +246,7 @@ const TimelineKonva = ({
           trackId: track.id
         });
       }
-     else if (track.type === "secondvideo") {
-            // ✅ ADD THIS: Right-click menu for second video
+     else if (track.type === "secondvideo") { 
             console.log('✅ Opening context menu from button (secondvideo)');
             setContextMenu({
               x: e.clientX,
@@ -238,21 +255,23 @@ const TimelineKonva = ({
               trackType: 'secondvideo' // ✅ Add trackType
             });
           }
-        }     
+        }  
     else {
       // Left-click on button (existing behavior)
-      if (track.type.toLowerCase().includes("video"))
-        onAddVideoRequest?.(track.id);
+      if (track.type === "secondvideo")
+        onAddSecondVideoRequest?.(track.id);
+       else if (track.type === "videooverlay") {  
+        onAddVideoOverlay?.(); 
+    }  
+       else if (track.type === "image")   
+      onAddImageRequest?.(track.id);          
       else if (track.type === "audio")
         onAddAudioRequest?.(track.id);
-      else if (track.type === "text" || track.type === "image")
-        
-        onAddAction?.(track.id, currentTime);
-      else if (track.type === "secondvideo") {
-      // ✅ Second video track
-      console.log('📹 Adding second video');
-      onAddSecondVideoRequest?.(track.id);
-    }   
+      else if (track.type === "text" )  //
+                onAddAction?.(track.id, currentTime);
+      else if (track.type.toLowerCase().includes("video")) {
+         onAddVideoRequest?.(track.id);  
+     }   
     }
   };
   
@@ -276,8 +295,45 @@ const TimelineKonva = ({
       }}
     >
       {razorMode ? "✂️ Razor Active (Click to Disable)" : "✂️ Enable Razor Tool"}
-    </button>
-
+    </button> 
+    <input
+      type="file"
+      accept="video/*"
+      hidden
+      id="insert-video-input"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        
+        const position = prompt(
+          `Insert at what position? (0 - ${videoDuration.toFixed(2)}s)\n` +
+          `Current time: ${currentTime.toFixed(2)}s`,
+          currentTime.toFixed(2)
+        );
+        
+        if (position !== null) {
+          handleAddInsertVideo(file, parseFloat(position));
+        }
+        
+        e.target.value = "";
+      }}
+    />
+     <button
+      onClick={() => document.getElementById('insert-video-input').click()}
+      disabled={!serverFilename}
+      style={{
+        padding: "8px 16px", 
+         background: serverFilename ? "#10b981" : "#6b7280",
+        color: "white",
+        border: "none",
+        borderRadius: 6,
+        cursor: serverFilename ? "pointer" : "not-allowed", 
+        fontWeight: "bold"
+      }}
+    >
+      ➕ Add Insert Video
+    </button> 
+    
     {razorMode && (
       <div style={{ 
         padding: 8, 
@@ -351,11 +407,11 @@ const TimelineKonva = ({
                 track.type === "audio" 
                   ? "Left-click: Add Audio | Right-click: More options"
                   : track.type === "secondvideo"
-                  ? "Left-click: Add Second Video | Right-click: Remove" // ✅ Updated tooltip
+                  ? "Left-click: Add Second Video | Right-click: Remove"  
                   : `Add ${initCap(track.type)}`
               }
             >
-             {track.type === "secondvideo" ? "2V" : initCap(track.type).slice(0, 2)}
+             {track.type === "secondvideo" ? "Sec.VI" : initCap(track.type).slice(0, 2)}
             </button>
           </div>
         ))}
@@ -436,8 +492,10 @@ const TimelineKonva = ({
               const trackY = rowIndex * trackHeight + 30;
               let trackBgColor = "#333";
               if (track.type === "secondvideo") {
-                trackBgColor = "#2d1b4e"; // Darker purple
-              }
+                trackBgColor = "#2d1b4e";  
+              } else if (track.type === "videooverlay") {  
+                    trackBgColor = "#1e3a5f";  
+                  }
               return (
                 <Group key={track.id} x={0} y={trackY}>
                   <Rect
@@ -452,9 +510,9 @@ const TimelineKonva = ({
                   <Text
                     x={5}
                     y={5}
-                    text={track.type === "secondvideo" ? "Second Video" : initCap(track.type)}
+                    text={track.type === "secondvideo" ? "Second Video" : track.type === "videooverlay" ? "Video Overlay"  : initCap(track.type)}
                     fontSize={11}
-                    fill={track.type === "secondvideo" ? "#c4b5fd" : "#888"}
+                    fill={track.type === "secondvideo" ? "#c4b5fd" : track.type === "videooverlay"? "#93c5fd"  : "#888"}
                     fontFamily="Arial"
                     listening={false}
                   />
@@ -476,7 +534,8 @@ const TimelineKonva = ({
                     if (track.type === "audio") color = "lightgreen";
                     if (track.type === "image") color = "orange";
                     if (track.type === "video") color = "#4a5568";
-                     if (track.type === "secondvideo") color = "#8b5cf6"; 
+                    if (track.type === "secondvideo") color = "#8b5cf6"; 
+                    if (track.type === "videooverlay") color = "#3b82f6";
                     return (
                       <Group key={action.id} x={actionX} y={4}>
                         <Rect
@@ -511,7 +570,26 @@ const TimelineKonva = ({
                             />
                           </>
                         )}
-
+                        {/* ✅ ADD DELETE BUTTON FOR IMAGE */}
+                        {track.type === "image" && (
+                          <>
+                            <Circle
+                              x={actionW - 10}
+                              y={8}
+                              radius={6}
+                              fill="red"
+                              onClick={() => onDeleteImageOverlay?.(action.id)}
+                            />
+                            <Text
+                              x={actionW - 13}
+                              y={4}
+                              text="×"
+                              fontSize={12}
+                              fill="#fff"
+                              onClick={() => onDeleteImageOverlay?.(action.id)}
+                            />
+                          </>
+                        )}
                         {track.type === "text" && action.text && (
                           <Text
                             x={5}
@@ -522,7 +600,17 @@ const TimelineKonva = ({
                             listening={false}
                           />
                         )}
-
+                        {/* ✅ ADD IMAGE PREVIEW IN TIMELINE */}
+                          {track.type === "image" && action.filename && (
+                            <Text
+                              x={5}
+                              y={(trackHeight - 10) / 2 - 6}
+                              text={`🖼️ ${action.filename.slice(0, 15)}...`}
+                              fontSize={10}
+                              fill="#fff"
+                              listening={false}
+                            />
+                          )}
                         {track.type === "video" && allFrames.length > 0 && (
                           <>
                             {allFrames.map((frameSrc, frameIndex) => {
@@ -619,7 +707,37 @@ const TimelineKonva = ({
     }}
     onMouseDown={(e) => e.stopPropagation()}
   >
-    {contextMenu.trackType === 'secondvideo' ? (
+    {contextMenu.trackType === 'videooverlay' ? (
+      // ✅ Video overlay menu options
+      [
+        { label: "🗑 Remove Overlay", action: "remove" },
+        { label: "⚙️ Adjust Position", action: "adjust" },
+        { label: "🔊 Adjust Volume", action: "volume" },
+      ].map((item) => (
+        <div
+          key={item.action}
+          style={{
+            padding: "8px 12px",
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: "13px",
+            borderRadius: "4px",
+            transition: "background 0.15s"
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "#333"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+          onClick={() => {
+            if (item.action === "remove") {
+              onDeleteVideoOverlay?.(contextMenu.trackId);
+            }
+            // Add handlers for adjust and volume later
+            setContextMenu(null);
+          }}
+        >
+          {item.label}
+        </div>
+      ))
+    ) : contextMenu.trackType === 'secondvideo' ? (
       // Second video menu options
       [
         { label: "🗑 Remove Second Video", action: "remove" },

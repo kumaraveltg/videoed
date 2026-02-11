@@ -52,6 +52,7 @@ function VideoPlayer({
         autoPlay={autoPlay}
         controls={controls}
         onLoadedMetadata={(e) => {
+           console.log("METADATA LOADED");
           setHeight(e.target.videoHeight);
           onLoadedMetadata && onLoadedMetadata(e);
         }}
