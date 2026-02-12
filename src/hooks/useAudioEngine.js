@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { AudioModeEngine } from "../components/AudioModeEngine";
+import { AudioModeEngine } from ".../components/AudioModeEngine";
 
  function useAudioEngine(videoRef, audioRef) {
   const engineRef = useRef(null);
