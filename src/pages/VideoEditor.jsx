@@ -208,10 +208,10 @@
 
     const result = [];
 
-    for (let i = 0; i < cuts.length - 1; i++) {
+    for (let i = 0; i < cuts.length - 1; i+=2) {
 
       result.push({
-        id: i,
+        id: i/2,
         start: cuts[i],
         end: cuts[i + 1]
       });

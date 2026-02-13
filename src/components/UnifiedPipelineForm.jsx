@@ -93,9 +93,11 @@ function UnifiedPipelineForm({
       image_overlays: hasImageOv,
       audio_control: hasAudioChange,
       insert_at_position: hasInserts,
-      split_screen: hasSplit
+      //split_screen: hasSplit
     });
-  }, [clips, tracks, videoOverlays, imageOverlays, audioMode, insertVideos, splitScreenConfig]);
+  }, [clips, tracks, videoOverlays, imageOverlays, audioMode, insertVideos 
+    //, splitScreenConfig
+    ]);
 
   // Debug info
   useEffect(() => {
@@ -114,7 +116,7 @@ function UnifiedPipelineForm({
       audioFileName: addedAudioFile?.name || 'none',
       audioTrackActions: audioTrack?.actions?.length || 0,
       hasInsertVideos: insertVideos?.length || 0,
-      splitScreenEnabled: splitScreenConfig?.enabled || false
+      //splitScreenEnabled: splitScreenConfig?.enabled || false
     });
   }, [mainVideo, mainVideoPath, clips, tracks, videoOverlays, imageOverlays, audioMode, addedAudioFile, insertVideos, splitScreenConfig]);
 
@@ -153,7 +155,7 @@ function UnifiedPipelineForm({
     console.log('✅ Adding trim task');
     payload.trim = {
       enabled: true,
-      clips: clips
+      cuts: clips
     };
   }
 
@@ -169,12 +171,26 @@ function UnifiedPipelineForm({
 
   // Video inserts (PIP)
   if (tasks.video_inserts && videoOverlays?.length > 0) {
-    console.log('✅ Adding video_inserts task');
-    payload.video_inserts = {
-      enabled: true,
-      overlays: videoOverlays
-    };
-  }
+  console.log('✅ Adding video_inserts task');
+  payload.multiple_inserts = {   
+    enabled: true,
+    inserts: videoOverlays.map(overlay => ({   
+      insert_filename: overlay.serverFilename,
+      start_time: overlay.start,
+      end_time: overlay.end,
+      x: overlay.position.x,
+      y: overlay.position.y,
+      width: overlay.size.width,
+      height: overlay.size.height,
+      opacity: overlay.opacity || 1.0,
+      volume: overlay.volume || 0.5,
+      z_index: overlay.zIndex || 1,
+      loop: false,
+      fade_in: 0.0,
+      fade_out: 0.0
+    }))
+  };
+}
 
   // Image overlays
   if (tasks.image_overlays && imageOverlays?.length > 0) {
@@ -192,19 +208,19 @@ function UnifiedPipelineForm({
       enabled: true,
       mode: audioMode,
       ...(audioMode === 'replace' && uploadedAudioFilename && {
-        audio_path: uploadedAudioFilename
+        audio_filename: uploadedAudioFilename
       })
     };
   }
 
   // Split screen
-  if (tasks.split_screen && splitScreenConfig?.enabled) {
-    console.log('✅ Adding split_screen task');
-    payload.split_screen = {
-      enabled: true,
-      ...splitScreenConfig
-    };
-  }
+  // if (tasks.split_screen && splitScreenConfig?.enabled) {
+  //   console.log('✅ Adding split_screen task');
+  //   payload.split_screen = {
+  //     enabled: true,
+  //     ...splitScreenConfig
+  //   };
+  // }
 
   console.log('📤 Final payload tasks:', payload.tasks);
   return payload;
@@ -229,9 +245,9 @@ function UnifiedPipelineForm({
     if (selectedTasks.insert_at_position && insertVideos?.length > 0) {
       tasks.push(`Insert (${insertVideos.length} videos)`);
     }
-    if (selectedTasks.split_screen && splitScreenConfig?.enabled) {
-      tasks.push('Split Screen');
-    }
+    // if (selectedTasks.split_screen && splitScreenConfig?.enabled) {
+    //   tasks.push('Split Screen');
+    // }
     return tasks;
   };
 
@@ -256,7 +272,7 @@ function UnifiedPipelineForm({
     video_inserts: videoOverlays?.length > 0,
     image_overlays: imageOverlays?.length > 0,
     audio_control: audioMode !== 'keep',
-    split_screen: splitScreenConfig?.enabled || false
+    //split_screen: splitScreenConfig?.enabled || false
   };
 
   console.log('🔍 updatedSelectedTasks BEFORE passing:', updatedSelectedTasks);
@@ -302,10 +318,10 @@ function UnifiedPipelineForm({
   }
   
   // Auto-enable split_screen if enabled
-  if (splitScreenConfig?.enabled) {
-    updatedSelectedTasks.split_screen = true;
-    console.log('✅ Auto-enabled split_screen task');
-  }
+  // if (splitScreenConfig?.enabled) {
+  //   updatedSelectedTasks.split_screen = true;
+  //   console.log('✅ Auto-enabled split_screen task');
+  // }
   
   console.log('🔍 Updated selectedTasks:', updatedSelectedTasks);
   
