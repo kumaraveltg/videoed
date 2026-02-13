@@ -13,7 +13,7 @@ import { AudioModeEngine } from ".../components/AudioModeEngine";
     );
 
     engineRef.current.sync();
-
+    
     return () => {
       engineRef.current = null;
     };

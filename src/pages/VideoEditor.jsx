@@ -10,6 +10,7 @@
   import { AUDIO_MODES ,AudioModeEngine } from "../components/AudioModeEngine";
   import UnifiedPipelineForm from "../components/UnifiedPipelineForm";
   import { debugLog, debugGroup, debugGroupEnd } from "../utils/debuggerLog";
+  import {useVirtualFrames} from "../hooks/useVirtualFrames";
 
 
   function VideoEditor() {
@@ -17,8 +18,10 @@
     const [file, setFile] = useState(null);
     const [videoSrc, setVideoSrc] = useState(null);
     const [duration, setDuration] = useState(0);
-    const [videoWidthPx, setVideoWidthPx] = useState(0);
-    const [videoHeightPx, setVideoHeightPx] = useState(0); 
+    const [videoWidthPx, setVideoWidthPx] = useState(640);
+    const [videoHeightPx, setVideoHeightPx] = useState(360); 
+    const [renderedVideoWidth, setRenderedVideoWidth] = useState(640); 
+    const [renderedVideoHeight, setRenderedVideoHeight] = useState(360);
     const [splitScreenConfig, setSplitScreenConfig] = useState({
               enabled: false,
               topVideoFilename: null,
@@ -61,7 +64,7 @@
     const [selectedImageOverlay, setSelectedImageOverlay] = useState(null);
     const [isProcessingImages, setIsProcessingImages] = useState(false); 
     const [mainVideo, setMainVideo] = useState(null);
-    
+     
     
 
 
@@ -82,6 +85,8 @@
     const imageOverlayInputRef = useRef(null);
     const PIXELS_PER_SECOND = 10;
     const timelineWidth = videoDuration * PIXELS_PER_SECOND;
+    const videoContainerRef = useRef(null);
+    const timelineToVideoScale = renderedVideoWidth / (timelineWidth || 1);        
 
     const setSelectedActionById = (id) => {
       if (!id) return setSelectedAction(null);
@@ -91,7 +96,7 @@
 
     const DEFAULT_VIDEO = "/default.mp4";
     //const activeVideoSrc = selectedVideoSrc || blobUrl || videoSrc || DEFAULT_VIDEO;
-   const activeVideoSrc = mainVideoSource  || videoSrc  || DEFAULT_VIDEO;
+   const activeVideoSrc = mainVideoSource ||   videoSrc || DEFAULT_VIDEO;
 
     // ------------------- FILE UPLOAD -------------------
     const maxFileSizeMB = 200 * 1024 * 1024;
@@ -102,6 +107,71 @@
     setMainVideo(file); // ✅ This should set the File object
   }
 };
+
+const calculateRenderedDimensions = (videoElement) => {
+    if (!videoElement || !videoContainerRef.current) return;
+    
+  
+  if (!videoContainerRef.current) {
+    console.log('⚠️ No container ref');
+    return;
+  }
+  
+  if (!videoElement.videoWidth || !videoElement.videoHeight) {
+    console.log('⚠️ Video dimensions not ready');
+    return;
+  }
+
+    const containerWidth = videoContainerRef.current.clientWidth;
+    const containerHeight = videoContainerRef.current.clientHeight;
+    if (!containerWidth || !containerHeight) {
+    console.log('⚠️ Container not rendered yet');
+    return;
+  }
+    const videoAspectRatio = videoElement.videoWidth / videoElement.videoHeight;
+    const containerAspectRatio = containerWidth / containerHeight;
+
+    let renderedWidth, renderedHeight;
+
+    if (videoAspectRatio > containerAspectRatio) {
+      // Video is wider - constrain by width
+      renderedWidth = containerWidth;
+      renderedHeight = containerWidth / videoAspectRatio;
+    } else {
+      // Video is taller - constrain by height
+      renderedHeight = containerHeight;
+      renderedWidth = containerHeight * videoAspectRatio;
+    }
+
+    // ✅ ADD THIS VALIDATION BEFORE SETTING STATE
+  if (!isFinite(renderedWidth) || !isFinite(renderedHeight) || 
+      renderedWidth <= 0 || renderedHeight <= 0) {
+    console.log('⚠️ Invalid calculated dimensions:', { renderedWidth, renderedHeight });
+    return;
+  }
+    console.log('📐 Calculated rendered dimensions:', {
+      original: { width: videoElement.videoWidth, height: videoElement.videoHeight },
+      container: { width: containerWidth, height: containerHeight },
+      rendered: { width: renderedWidth, height: renderedHeight }
+    });
+
+    setRenderedVideoWidth(Math.round(renderedWidth));
+    setRenderedVideoHeight(Math.round(renderedHeight));
+  };
+   useEffect(() => {
+      const video = videoRef.current;
+      if (!video) return;
+  
+      const resizeObserver = new ResizeObserver(() => {
+        calculateRenderedDimensions(video);
+      });
+  
+      resizeObserver.observe(video);
+  
+      return () => {
+        resizeObserver.disconnect();
+      };
+    }, [videoRef.current]);
 
     const handleVideoRequest = async (file) => {
       if (!file) return;
@@ -448,37 +518,179 @@
     };
 
     // ------------------- VIDEO UPLOAD WITH FRAMES -------------------
-    const handleOnVideoUpload = async (file) => {
-      setIsLoadingFrames(true);
+    //--- Virtual Frames----------
 
-      if (splitMode && secondVideoFile) {
+          // In your main component (App.jsx or wherever you manage state)
+
+const [frameCache, setFrameCache] = useState(new Map());
+const [loadingFrames, setLoadingFrames] = useState(new Set());
+const [failedFrames, setFailedFrames] = useState(new Set());
+
+// Load frames for visible range
+useEffect(() => {
+  if (!serverFilename || !visibleRange) return;
+
+  const start = Math.floor(visibleRange.start);
+  const end = Math.ceil(visibleRange.end);
+  
+  console.log(`[useVirtualFrames] Checking range ${start}-${end}`);
+
+  // Find frames that need loading
+  const framesToLoad = [];
+  for (let i = start; i <= end; i++) {
+    const isLoaded = frameCache.has(i);
+    const isLoading = loadingFrames.has(i);
+    const hasFailed = failedFrames.has(i);
+    
+    if (!isLoaded && !isLoading && !hasFailed) {
+      framesToLoad.push(i);
+    }
+  }
+
+  if (framesToLoad.length === 0) {
+    console.log(`[useVirtualFrames] All frames in range already loaded/loading`);
+    return;
+  }
+
+  console.log(`[useVirtualFrames] Loading ${framesToLoad.length} frames:`, framesToLoad);
+
+  // Mark as loading (single update)
+  setLoadingFrames(prev => {
+    const next = new Set(prev);
+    framesToLoad.forEach(i => next.add(i));
+    return next;
+  });
+
+  // ✅ Load frames in parallel with batching
+  const CONCURRENT_LOADS = 5;
+  
+  const loadBatch = async (batch) => {
+    const results = await Promise.allSettled(
+      batch.map(async (frameIndex) => {
+        try {
+          const url = `http://localhost:8000/video/frame/${serverFilename}/${frameIndex}`;
+          const response = await fetch(url);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          
+          return { frameIndex, objectUrl, success: true };
+        } catch (error) {
+          console.error(`[Frame ${frameIndex}] Load failed:`, error);
+          return { frameIndex, success: false, error };
+        }
+      })
+    );
+
+    // ✅ Collect results first (no state updates in loop)
+    const successfulFrames = new Map();
+    const failedFramesSet = new Set();
+    const completedFrames = new Set();
+
+    results.forEach((result, idx) => {
+      const frameIndex = batch[idx];
+      completedFrames.add(frameIndex);
+
+      if (result.status === 'fulfilled' && result.value.success) {
+        successfulFrames.set(frameIndex, result.value.objectUrl);
+        console.log(`[Frame ${frameIndex}] ✅ Loaded`);
+      } else {
+        failedFramesSet.add(frameIndex);
+        console.log(`[Frame ${frameIndex}] ❌ Failed`);
+      }
+    });
+
+    // ✅ Batch update: Only 3 state updates instead of N*3
+    if (successfulFrames.size > 0) {
+      setFrameCache(prev => {
+        const next = new Map(prev);
+        successfulFrames.forEach((url, idx) => next.set(idx, url));
+        return next;
+      });
+    }
+
+    setLoadingFrames(prev => {
+      const next = new Set(prev);
+      completedFrames.forEach(idx => next.delete(idx));
+      return next;
+    });
+
+    if (failedFramesSet.size > 0) {
+      setFailedFrames(prev => {
+        const next = new Set(prev);
+        failedFramesSet.forEach(idx => next.add(idx));
+        return next;
+      });
+    }
+  };
+
+  // ✅ Create batches and load them
+  const batches = [];
+  for (let i = 0; i < framesToLoad.length; i += CONCURRENT_LOADS) {
+    batches.push(framesToLoad.slice(i, i + CONCURRENT_LOADS));
+  }
+
+  // ✅ Load batches sequentially to avoid overwhelming the server
+  batches.forEach(batch => loadBatch(batch));
+
+}, [visibleRange, serverFilename,]); // frameCache, loadingFrames, failedFrames
+// ✅ Cleanup: Revoke object URLs when frames are removed from cache
+useEffect(() => {
+  return () => {
+    frameCache.forEach(url => URL.revokeObjectURL(url));
+  };
+}, [ ]);
+
+const retryFailedFrames = () => {
+  console.log(`[Retry] Clearing ${failedFrames.size} failed frames`);
+  setFailedFrames(new Set());
+};
+  
+
+const handleOnVideoUpload = async (file) => {
+  setIsLoadingFrames(true);
+
+  if (splitMode && secondVideoFile) {
     console.warn("⚠️ Uploading main video while in split mode!");
   }
 
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
 
-        const res = await fetch("http://localhost:8000/upload/local", {
-          method: "POST",
-          body: formData,
-        });
+    const res = await fetch("http://localhost:8000/upload/local", {
+      method: "POST",
+      body: formData,
+    });
 
-        if (!res.ok) {
-          throw new Error(`Server responded with ${res.status}`);
-        }
+    if (!res.ok) {
+      throw new Error(`Server responded with ${res.status}`);
+    }
 
-        const data = await res.json();
+    const data = await res.json();
 
-        const url = URL.createObjectURL(file);
-        setBlobUrl(url);
-        setFile(file);
+    const url = URL.createObjectURL(file);
+    setBlobUrl(url);
+    setFile(file);
 
-        setServerFilename(data.filename);
-        setVideoSrc(`/stream/${data.filename}`);
+    setServerFilename(data.filename);
+    setVideoSrc(`/stream/${data.filename}`);
 
-        const duration = data.thumbnails?.length || 0;
-
+    // ✅ CRITICAL FIX: Get actual video duration
+    const video = document.createElement("video");
+    video.src = url;
+    
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        const actualDuration = video.duration;
+        console.log(`[Upload] Video duration: ${actualDuration}s`);
+        
+        setVideoDuration(actualDuration);  // ✅ Set global duration
+        
         setTracks((prev) =>
           prev.map((track) =>
             track.type === "video"
@@ -488,54 +700,56 @@
                     {
                       id: "video-main",
                       start: 0,
-                      end: duration,
-                      allFrames: data.thumbnails || [],
-                      frames: (data.thumbnails || []).slice(0, 30),
+                      end: actualDuration,  // ✅ Use actual duration, not thumbnail count
+                      useVirtualFrames: true,
                     },
                   ],
                 }
               : track
           )
         );
+        
+        URL.revokeObjectURL(video.src);
+        resolve();
+      };
+    });
+    
+  } catch (err) {
+    console.error("Video upload to server failed:", err);
 
-        setVideoDuration(duration);
-      } catch (err) {
-        console.error("Video upload to server failed:", err);
+    // Fallback: local frame extraction
+    const video = document.createElement("video");
+    video.src = URL.createObjectURL(file);
+    video.onloadedmetadata = () => {
+      const duration = video.duration;
+      setVideoDuration(duration);
 
-        // Fallback: local frame extraction
-        const video = document.createElement("video");
-        video.src = URL.createObjectURL(file);
-        video.onloadedmetadata = () => {
-          const duration = video.duration;
-          setVideoDuration(duration);
+      setTracks((prev) =>
+        prev.map((track) =>
+          track.type === "video"
+            ? {
+                ...track,
+                actions: [
+                  {
+                    id: "video-main",
+                    start: 0,
+                    end: duration,
+                    useVirtualFrames: true,
+                  },
+                ],
+              }
+            : track
+        )
+      );
 
-          setTracks((prev) =>
-            prev.map((track) =>
-              track.type === "video"
-                ? {
-                    ...track,
-                    actions: [
-                      {
-                        id: "video-main",
-                        start: 0,
-                        end: duration,
-                        allFrames: [],
-                        frames: [],
-                      },
-                    ],
-                  }
-                : track
-            )
-          );
-
-          URL.revokeObjectURL(video.src);
-        };
-
-        console.log("Video loaded locally, server features disabled");
-      } finally {
-        setIsLoadingFrames(false);
-      }
+      URL.revokeObjectURL(video.src);
     };
+
+    console.log("Video loaded locally, server features disabled");
+  } finally {
+    setIsLoadingFrames(false);
+  }
+};
 
     const handleAddVideoAction = (trackId, start = 0, end = 5, src = null) => {
       const newAction = {
@@ -1503,28 +1717,28 @@ const handleDeleteVideoOverlay = (overlayId) => {
   
   // Find and revoke blob URL
   const overlay = videoOverlays.find(o => o.id === overlayId);
-  if (overlay && overlay.src?.startsWith("blob:")) {
-    URL.revokeObjectURL(overlay.src);
-  }
+    if (overlay && overlay.src?.startsWith("blob:")) {
+      URL.revokeObjectURL(overlay.src);
+    }
 
-  setVideoOverlays(prev => prev.filter(o => o.id !== overlayId));
-  
-  if (selectedVideoOverlay?.id === overlayId) {
-    setSelectedVideoOverlay(null);
-  }
+    setVideoOverlays(prev => prev.filter(o => o.id !== overlayId));
+    
+    if (selectedVideoOverlay?.id === overlayId) {
+      setSelectedVideoOverlay(null);
+    }
 
-  // Remove from timeline track
-  setTracks(prev =>
-    prev.map(track =>
-      track.id === "track-video-overlay"
-        ? {
-            ...track,
-            actions: track.actions.filter(a => a.id !== overlayId),
-          }
-        : track
-    )
-  );
-};
+    // Remove from timeline track
+    setTracks(prev =>
+      prev.map(track =>
+        track.id === "track-video-overlay"
+          ? {
+              ...track,
+              actions: track.actions.filter(a => a.id !== overlayId),
+            }
+          : track
+      )
+    );
+  };
 
 // Handler for timeline updates
 const handleVideoOverlayTimelineChange = (overlayId, newStart, newEnd) => {
@@ -1667,65 +1881,65 @@ const handleAddInsertVideo = async (file, position) => {
 
 // Export with inserts
 const handleExportWithInserts = async () => {
-  if (!serverFilename) {
-    alert("⚠️ Please upload the main video first");
-    return;
-  }
+      if (!serverFilename) {
+        alert("⚠️ Please upload the main video first");
+        return;
+      }
 
-  if (insertVideos.length === 0) {
-    alert("⚠️ No insert videos added");
-    return;
-  }
+      if (insertVideos.length === 0) {
+        alert("⚠️ No insert videos added");
+        return;
+      }
 
-  try {
-    setIsProcessingInsert(true);
+      try {
+        setIsProcessingInsert(true);
 
-    const payload = {
-      main_video: serverFilename,
-      inserts: insertVideos.map(ins => ({
-        filename: ins.filename,
-        position: ins.position
-      }))
+        const payload = {
+          main_video: serverFilename,
+          inserts: insertVideos.map(ins => ({
+            filename: ins.filename,
+            position: ins.position
+          }))
+        };
+
+        console.log("📤 Sending insert request:", payload);
+
+        const response = await fetch("http://localhost:8000/video/insert-at-position", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Insert failed");
+        }
+
+        const data = await response.json();
+        console.log("✅ Video insert complete:", data);
+
+        // Update video source
+        setVideoSrc(data.video_url);
+        setServerFilename(data.output);
+
+        alert(
+          `✅ Insert successful!\n\n` +
+          `Original: ${data.original_duration.toFixed(2)}s\n` +
+          `Final: ${data.final_duration.toFixed(2)}s\n` +
+          `Added: ${(data.final_duration - data.original_duration).toFixed(2)}s`
+        );
+
+        // Clear insert list
+        setInsertVideos([]);
+        loadVideosForMerge();
+
+      } catch (err) {
+        console.error("Insert error:", err);
+        alert("❌ Failed to insert videos: " + err.message);
+      } finally {
+        setIsProcessingInsert(false);
+      }
     };
-
-    console.log("📤 Sending insert request:", payload);
-
-    const response = await fetch("http://localhost:8000/video/insert-at-position", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Insert failed");
-    }
-
-    const data = await response.json();
-    console.log("✅ Video insert complete:", data);
-
-    // Update video source
-    setVideoSrc(data.video_url);
-    setServerFilename(data.output);
-
-    alert(
-      `✅ Insert successful!\n\n` +
-      `Original: ${data.original_duration.toFixed(2)}s\n` +
-      `Final: ${data.final_duration.toFixed(2)}s\n` +
-      `Added: ${(data.final_duration - data.original_duration).toFixed(2)}s`
-    );
-
-    // Clear insert list
-    setInsertVideos([]);
-    loadVideosForMerge();
-
-  } catch (err) {
-    console.error("Insert error:", err);
-    alert("❌ Failed to insert videos: " + err.message);
-  } finally {
-    setIsProcessingInsert(false);
-  }
-};
 
 // Update insert position
 const handleUpdateInsertPosition = (id, newPosition) => {
@@ -2033,6 +2247,7 @@ const handleUnifiedProcessComplete = (result) => {
   }
 };
 
+
     // ------------------- RENDER -------------------
     return (
       <div style={{ padding: 20 }}>
@@ -2041,14 +2256,21 @@ const handleUnifiedProcessComplete = (result) => {
         <YouTubePreview url="" /> 
 
         <div
-          style={{
-            position: "relative",
-            width: videoWidthPx || 640,
-            height: splitMode ? "auto" : (videoHeightPx || 360),
-            marginTop: 10,
-            border: "2px solid #444",
-          }}
-        >
+        ref={videoContainerRef}
+        style={{
+          position: "relative",
+          width: 640, // Fixed container width
+          height: splitMode ? "auto" : 360, // Fixed container height
+          marginTop: 10,
+          marginLeft: "auto",
+          marginRight: "auto",
+          border: "2px solid #444",
+          background: "#000",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
           {isLoadingFrames && (
             <div
               style={{
@@ -2070,24 +2292,30 @@ const handleUnifiedProcessComplete = (result) => {
           )}
 
           {!splitMode && (  
-            <div style={{ position: "relative", width: videoWidthPx || 640,display: "inline-block" }}>
+            <div className="editor-root" 
+            //style={{ position: "relative", width: videoWidthPx || 640,display: "inline-block" }} 
+            >
+             <div className="video-area"> 
             <VideoPlayer
               //key={activeVideoSrc}
               ref={videoRef}
               src={activeVideoSrc}
               muted={false}
-              width={videoWidthPx || 640}
-              height={videoHeightPx || 440}
+              width={640}
+              height={360}
               controls
               preload="auto" 
-              style = {{zIndex: 1,ObjectFit:"contain",background: "#000"}}
-              onLoadedMetadata={(e) => {
+              style = {{zIndex: 1,objectFit:"contain",background: "#000" ,maxWidth: "100%",
+                  maxHeight: "100%"}}
+              onLoadedMetadata={(e) => { 
                 setDuration(e.target.duration);
                 setVideoWidthPx(e.target.videoWidth);
                 setVideoHeightPx(e.target.videoHeight);
                 setVideoDuration(e.target.duration);
+                calculateRenderedDimensions(e.target);
               }}
             /> 
+            </div> 
             {/* ✅ Hidden audio element */}
           {addedAudioSrc && (
             <audio
@@ -2102,35 +2330,37 @@ const handleUnifiedProcessComplete = (result) => {
         </div>
           )}
 
-        {!splitMode && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: videoWidthPx || 640,
-                      height: videoHeightPx || 440,
-                      pointerEvents: "auto",
-                      // pointerEvents: selectedAction ? "auto" : "none",
-                      zIndex: 5,
-                    }}
-                  >
-                    {videoWidthPx > 0 && videoHeightPx > 0 && (
-                      <VideoOverlayKonva
-                        videoWidth={videoWidthPx}
-                        videoHeight={videoHeightPx}
-                        videoDuration={duration}
-                        tracks={tracks}
-                        selectedActionId={selectedAction?.id}
-                        setSelectedActionId={setSelectedActionById}
-                        onUpdateAction={handleUpdateAction}
-                        currentTime={currentTime}
-                        imageOverlays={imageOverlays} 
-                        onUpdateImageOverlay={handleUpdateImageOverlay}
-                      />
-                    )}
-                  </div>
-                )} 
+{!splitMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: videoWidthPx || 640,
+            height: videoHeightPx || 440,
+            //pointerEvents: "auto",
+             pointerEvents: selectedAction ? "auto" : "none",
+            zIndex: 5,
+          }}
+        >
+          {renderedVideoWidth > 0 && renderedVideoHeight > 0 && (
+            <VideoOverlayKonva
+              videoWidth={renderedVideoWidth}
+              videoHeight={renderedVideoHeight}
+              containerWidth={640}
+              containerHeight={360}
+              videoDuration={duration}
+              tracks={tracks}
+              selectedActionId={selectedAction?.id}
+              setSelectedActionId={setSelectedActionById}
+              onUpdateAction={handleUpdateAction}
+              currentTime={currentTime}
+              imageOverlays={imageOverlays} 
+              onUpdateImageOverlay={handleUpdateImageOverlay}
+            />
+          )}
+        </div>
+      )} 
        {splitMode && (
   <div
     style={{
@@ -2278,7 +2508,7 @@ const handleUnifiedProcessComplete = (result) => {
       <div>Server Filename: {serverFilename || "❌ none"}</div>
       <div>Bottom Filename: {splitScreenConfig.bottomVideoFilename || "❌ none"}</div>
     </div>
-  </div>
+  </div> 
   )}
         </div>
 
@@ -2295,13 +2525,7 @@ const handleUnifiedProcessComplete = (result) => {
             e.target.value = "";
           }}
         />
-        {/* <input
-          type="file"
-          ref={videoInputRef}
-          accept="video/*"
-          hidden
-          onChange={handleVideoFileSelect}
-        /> */}
+        
         <input
           type="file"
           ref={videoInputRef}
@@ -2323,7 +2547,7 @@ const handleUnifiedProcessComplete = (result) => {
         />
 
         {/* ✅ IMPROVED: Timeline with scroll sync */}
-        <div
+        {/* <div
           ref={timelineScrollRef}
           style={{
             overflowX: "auto",
@@ -2335,13 +2559,27 @@ const handleUnifiedProcessComplete = (result) => {
             position: "relative",
             pointerEvents: "auto"
           }}
-        >
+        > */}
+      <div 
+        style={{
+          width: 640, // ✅ Match video player width exactly
+          margin: "20px auto 0", // Center align
+          overflowX: "auto",
+          overflowY: "hidden",
+          background: "#222",
+          border: "1px solid #555",
+          position: "relative",
+        }}
+        ref={timelineScrollRef}
+      >
+
+      <div className="timeline-scroll-content">
           <TimelineKonva
             tracks={tracks}
             visibleRange={visibleRange}
             videoDuration={videoDuration}
             timelinePxWidth={timelineWidth}
-            width={timelineWidth}
+            width={640}
             videoRef={videoRef}
             currentTime={currentTime}
             scrollLeft={timelineScrollLeft} // ✅ Pass scroll position
@@ -2373,13 +2611,40 @@ const handleUnifiedProcessComplete = (result) => {
             handleAddInsertVideo={handleAddInsertVideo}
             onAddImageRequest={handleAddImageRequest} 
             onDeleteImageOverlay={handleDeleteImageOverlay}  
-
+            frameCache={frameCache}
+            loadingFrames={loadingFrames}
+            failedFrames={failedFrames}
           />
         </div>
-      
+     </div>
+
+      {/* ✅ Debug panel to verify dimensions */}
+      <div style={{
+        margin: "10px auto",
+        padding: 10,
+        background: "#1f2937",
+        borderRadius: 4,
+        maxWidth: renderedVideoWidth||640,
+        fontSize: 11,
+        color: "#9ca3af",
+        fontFamily: "monospace"
+      }}>
+        <strong style={{ color: "#60a5fa" }}>📐 Dimension Debug:</strong>
+        <div>Original Video: {videoWidthPx}x{videoHeightPx}px</div>
+        <div>Rendered Video: {renderedVideoWidth}x{renderedVideoHeight}px</div>
+        <div>Timeline Width: {timelineWidth}px ({videoDuration.toFixed(2)}s × {PIXELS_PER_SECOND}px/s)</div>
+        <div>Container Width: {videoContainerRef.current?.clientWidth || 0}px</div>
+      </div>
 
   {/* ✅ ADD THIS NEW SECTION RIGHT AFTER THE AUDIO MODE INDICATOR */}
-  <div style={{ marginTop: 20 }}>
+  <div
+  style={{
+    padding: 20,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  }}
+>
     <button
       onClick={handleExportAudioMode}
       disabled={isProcessingAudio || !serverFilename}
@@ -2841,7 +3106,25 @@ const handleUnifiedProcessComplete = (result) => {
     >
       ➕ Add Insert Video
     </button>
+    {failedFrames.size > 0 && (
+  <button
+    onClick={retryFailedFrames}
+    style={{
+      padding: '6px 12px',
+      background: '#f59e0b',
+      color: 'white',
+      border: 'none',
+      borderRadius: 4,
+      cursor: 'pointer',
+      fontSize: 12,
+      marginLeft: 10
+    }}
+  >
+    ⚠️ Retry {failedFrames.size} Failed Frames
+  </button>
+)}
   </div>
+  
 
           {/* Insert List */}
           {insertVideos.length > 0 && (
@@ -3041,7 +3324,8 @@ const handleUnifiedProcessComplete = (result) => {
                 "🎬 Export Video with Image Overlays"
               )}
             </button>  
-          </div>
+          
+       </div>    
       <hr />
        <div style={{ padding: 20 }}>
            {/* ... all your existing UI components ... */}
@@ -3080,11 +3364,39 @@ const handleUnifiedProcessComplete = (result) => {
            <hr style={{ margin: '40px 0', border: 'none', borderTop: '2px solid #374151' }} />
            
            {/* ... rest of your code (MergePanel, etc.) ... */}
-         </div>
+         </div> 
+
+       <button
+  onClick={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Direct approach - bypass handleAddVideoRequest
+    if (!videoInputRef.current) {
+      alert('File picker not initialized');
+      return;
+    }
+    
+    videoInputRef.current.click();
+  }}
+  style={{
+    padding: '14px 28px',
+    background: '#3b82f6',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontSize: 16,
+    fontWeight: 'bold'
+  }}
+>
+  📹 Upload Video
+</button>  
       <h3>🧩 Merge Videos</h3>
       <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
       
-    </div>
+    </div> 
+    
   );
 }
 

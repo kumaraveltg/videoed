@@ -1,5 +1,5 @@
 // TimelineKonva.jsx - IMPROVED with button context menu
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect,memo } from "react";
 import { Stage, Layer, Rect, Group, Line, Circle, Text } from "react-konva";
 import { Image as KonvaImage } from "react-konva";
 import TimelineRuler from "./TimelineRuler";
@@ -21,7 +21,8 @@ const TimelineKonva = ({
   onAddSecondVideoRequest,  
   onSecondVideoTrackAction,
   onAddVideoOverlay,        
-  onDeleteVideoOverlay, serverFilename,handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest
+  onDeleteVideoOverlay, serverFilename,
+  handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest,frameCache,loadingFrames,failedFrames
 }) => {
   const stageRef = useRef();
   const PIXELS_PER_SECOND = 10;
@@ -42,92 +43,149 @@ const TimelineKonva = ({
 
   
 
-  // Frame component
-  const Frame = ({ src, x, y, w, h, absoluteTime, frameIndex ,razorMode,onTimeChange, videoRef }) => {
-    const [image, setImage] = useState(null);
-    const [isHovered, setIsHovered] = useState(false);
+  // Frame component   src,
+  const Frame = memo(({ 
+  frameIndex,
+  frameCache,
+  isLoading,
+  x, 
+  y, 
+  w, 
+  h, 
+  absoluteTime, 
+  razorMode,
+  onTimeChange, 
+  videoRef,
+  isFailed 
+}) => {
+  const [image, setImage] = useState(null);
+  const [isHovered, setIsHovered] = useState(false);
 
-    useEffect(() => {
-    //console.log(`Frame ${frameIndex} - razorMode:`, razorMode);
-  }, [razorMode, frameIndex]);
-
-    useEffect(() => {
-      if (!src) return;
-      
-      const img = new window.Image();
-      img.src = src;
-      img.onload = () => setImage(img);
-      
-      return () => {
-        img.onload = null;
-      };
-    }, [src]);
-
-    const handleClick = (e) => {
-      console.log(`🖱️ Frame ${frameIndex} clicked! razorMode:`, razorMode); 
-      e.cancelBubble = true;
-      if ( razorMode) { console.log('⚠️ Razor mode active - ignoring frame click'); 
-        return; }
-      if (!onTimeChange || !videoRef?.current) return;
-
-      console.log(`Frame clicked - Index: ${frameIndex}, Time: ${absoluteTime}s`);
-
-      onTimeChange(absoluteTime);
-      
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.currentTime = absoluteTime;
-          videoRef.current.play().catch(() => {});
-        }
-      });
+  //console.log(`[Frame ${frameIndex}] Rendering at x=${x}, has cache: ${frameCache?.has(frameIndex)}, loading: ${isLoading}`);
+  useEffect(() => {
+    const cachedUrl = frameCache?.get(frameIndex);
+    
+    if (!cachedUrl) {
+      setImage(null);
+      return;
+    }
+    
+    const img = new window.Image();
+    img.src = cachedUrl;
+    img.onload = () => setImage(img);
+    img.onerror = () => {
+      console.error(`[Frame ${frameIndex}] Image load error`);
+      setImage(null);
     };
+    
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [frameIndex, frameCache]);
 
-    if (!image) return null;
+  const handleClick = (e) => {
+    e.cancelBubble = true;
+    if (razorMode) return;
+    if (!onTimeChange || !videoRef?.current) return;
 
+    onTimeChange(absoluteTime);
+    
+    requestAnimationFrame(() => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = absoluteTime;
+        videoRef.current.play().catch(() => {});
+      }
+    });
+  };
+
+  // ✅ Show placeholder when image is not loaded
+  if (!image) {
     return (
-      <>
-        <KonvaImage
-          image={image}
+      <Group>
+        <Rect
           x={x}
           y={y}
           width={w}
           height={h}
-          onClick={handleClick}
-          onTap={handleClick}
-          onMouseEnter={() => !razorMode && setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-          opacity={isHovered ? 0.9 : 1}
-          shadowBlur={isHovered ? 5 : 0}
-          shadowColor="rgba(255,255,255,0.5)"
-          listening = {true}
+          fill={isFailed ? "#3d1f1f" : "#2a2a2a"}  // Red tint for failed frames
+          stroke={isFailed ? "#ef4444" : "#444"}
+          strokeWidth={1}
+          listening={false}
         />
         
-        {isHovered && !razorMode && (
-          <>
-            <Rect
-              x={x}
-              y={y - 24}
-              width={w}
-              height={22}
-              fill="rgba(0,0,0,0.95)"
-              cornerRadius={4}
-              listening={false}
-            />
-            <Text
-              x={x + 3}
-              y={y - 20}
-              text={`${Math.floor(absoluteTime / 60)}:${(Math.floor(absoluteTime % 60)).toString().padStart(2, '0')}`}
-              fontSize={12}
-              fill="#fff"
-              fontFamily="monospace"
-              fontStyle="bold"
-              listening={false}
-            />
-          </>
-        )}
-      </>
+        {/* Loading/Error indicator */}
+        <Text
+          x={x + w/2}
+          y={y + h/2}
+          text={isFailed ? "✗" : isLoading ? "..." : "○"}
+          fontSize={10}
+          fill={isFailed ? "#ef4444" : isLoading ? "#60a5fa" : "#666"}
+          align="center"
+          verticalAlign="middle"
+          offsetX={5}
+          offsetY={5}
+          listening={false}
+        />
+      </Group>
     );
-  };
+  }
+
+  // ✅ Render loaded image
+  return (
+    <>
+      <KonvaImage
+        image={image}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        onClick={handleClick}
+        onTap={handleClick}
+        onMouseEnter={() => !razorMode && setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        opacity={isHovered ? 0.9 : 1}
+        shadowBlur={isHovered ? 5 : 0}
+        shadowColor="rgba(255,255,255,0.5)"
+        listening={true}
+      />
+      
+      {isHovered && !razorMode && (
+        <>
+          <Rect
+            x={x}
+            y={y - 24}
+            width={w}
+            height={22}
+            fill="rgba(0,0,0,0.95)"
+            cornerRadius={4}
+            listening={false}
+          />
+          <Text
+            x={x + 3}
+            y={y - 20}
+            text={`${Math.floor(absoluteTime / 60)}:${(Math.floor(absoluteTime % 60)).toString().padStart(2, '0')}`}
+            fontSize={12}
+            fill="#fff"
+            fontFamily="monospace"
+            fontStyle="bold"
+            listening={false}
+          />
+        </>
+      )}
+    </>
+  );
+}, (prevProps, nextProps) => {
+  // ✅ Custom comparison: only re-render if these specific props change
+  return (
+    prevProps.frameIndex === nextProps.frameIndex &&
+    prevProps.x === nextProps.x &&
+    prevProps.y === nextProps.y &&
+    prevProps.razorMode === nextProps.razorMode &&
+    prevProps.frameCache?.get(prevProps.frameIndex) === nextProps.frameCache?.get(nextProps.frameIndex)
+  );
+}); 
+Frame.displayName = 'Frame';
 
   const handleScrub = (e) => {
     const stage = e.target.getStage();
@@ -611,7 +669,7 @@ const TimelineKonva = ({
                               listening={false}
                             />
                           )}
-                        {track.type === "video" && allFrames.length > 0 && (
+                        {/* {track.type === "video" && allFrames.length > 0 && (
                           <>
                             {allFrames.map((frameSrc, frameIndex) => {
                               const absoluteTime = frameIndex;
@@ -643,7 +701,48 @@ const TimelineKonva = ({
                               );
                             })}
                           </> 
-                        )} 
+                        )}  */}
+                        {track.type === "video" && action.useVirtualFrames && (
+                          <>
+                          {/* {console.log('[Timeline] Rendering frames:', {
+                            actionId: action.id,
+                            start: action.start,
+                            end: action.end,
+                            duration: action.end - action.start,
+                            frameCount: Math.ceil(action.end - action.start),
+                            cacheSize: frameCache?.size,
+                            visibleRange
+                          })} */}
+                          
+                      <Group>
+                        {Array.from({ length: Math.ceil(duration) }, (_, i) => {
+                          const frameIndex = Math.floor(start) + i;
+                          const isLoading = loadingFrames?.has(frameIndex);  // ✅ Check loading
+                           const frameX = i * FRAME_WIDTH;  // Position relative to action start
+                           const absoluteTime = start + i;
+                           const isFailed = failedFrames?.has(frameIndex); 
+                          return (
+                             <React.Fragment key={`${action.id}-frame-${frameIndex}`}>
+                            <Frame
+                              frameIndex={frameIndex}      // ✅ Pass index
+                              frameCache={frameCache}      // ✅ Pass cache
+                              isLoading={isLoading}  
+                              isFailed={isFailed}       // ✅ Pass loading state
+                              x={frameX}
+                              y={0}
+                              w={FRAME_WIDTH}
+                              h={trackHeight - 10}
+                              absoluteTime={absoluteTime} 
+                              razorMode={razorMode}
+                              onTimeChange={onTimeChange}
+                              videoRef={videoRef}
+                            />
+                            </React.Fragment>
+                          );
+                        })}
+                      </Group>
+                      </>
+                    )}
                       </Group>
                     );
                   })}

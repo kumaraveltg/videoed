@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import "../app.css"
 
 function VideoPlayer({
   src,
@@ -42,24 +43,32 @@ function VideoPlayer({
     };
   }, [addedAudioRef]);
 
+  useEffect(()=>{
+  console.log("🔥 VideoPlayer Mounted");
+  return ()=> console.log("💀 VideoPlayer Unmounted");
+},[]);
+
   if (!src) return null;
 
   return (
-    <div className="video-player-component">
-      <video
-        ref={videoRef}
-        src={src}
-        autoPlay={autoPlay}
-        controls={controls}
-        onLoadedMetadata={(e) => {
-           console.log("METADATA LOADED");
-          setHeight(e.target.videoHeight);
-          onLoadedMetadata && onLoadedMetadata(e);
-        }}
-        {...rest}
-        style={{ width: "100%", height: height > 0 ? height : "auto" }}
-      />
-    </div>
+  <div className="video-player-component">
+  <div className="video-inner">
+    <video
+      ref={videoRef}
+      src={src}
+      autoPlay={autoPlay}
+      controls={controls}
+      onLoadedMetadata={(e) => {
+        console.log("METADATA LOADED");
+        onLoadedMetadata && onLoadedMetadata(e);
+      }}
+      {...rest}
+      className="video-element"
+    />
+  </div>
+</div>
+
+
   );
 }
 
