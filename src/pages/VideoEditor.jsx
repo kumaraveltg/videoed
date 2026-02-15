@@ -94,9 +94,9 @@
       setSelectedAction(found || null);
     };
 
-    const DEFAULT_VIDEO = "/default.mp4";
+    //const DEFAULT_VIDEO = "/default.mp4";
     //const activeVideoSrc = selectedVideoSrc || blobUrl || videoSrc || DEFAULT_VIDEO;
-   const activeVideoSrc = mainVideoSource ||   videoSrc || DEFAULT_VIDEO;
+   const activeVideoSrc = mainVideoSource ||   videoSrc ||null;
 
     // ------------------- FILE UPLOAD -------------------
     const maxFileSizeMB = 200 * 1024 * 1024;
@@ -331,12 +331,12 @@ const calculateRenderedDimensions = (videoElement) => {
       const newAction = {
         id: Date.now().toString(),
         start: startTime || 0,
-        end: (startTime || 0) + 3,
+        end: (startTime || 0) + 10,
         type: "text",
         text: "New Text",
         fontSize: 24,
         color: "white",
-        x: 0,
+        x: 50,
         y: 50,
       };
       setTracks((prev) =>
@@ -372,7 +372,7 @@ const calculateRenderedDimensions = (videoElement) => {
             const y = Number.isFinite(Number(merged.y))
               ? Number(merged.y)
               : Number(action.y) || 50;
-
+             console.log("✅ Updated action:", { id: actionId, start, end, x, y });
             return { ...merged, start, end, fontSize, x, y };
           }),
         }))
@@ -393,38 +393,38 @@ const calculateRenderedDimensions = (videoElement) => {
       );
     };
 
-    useEffect(() => {
-      let repaired = false;
-      const newTracks = tracks.map((track) => {
-        const newActions = track.actions.map((a) => {
-          const start = Number.isFinite(Number(a.start)) ? Number(a.start) : 0;
-          let end = Number.isFinite(Number(a.end)) ? Number(a.end) : NaN;
-          if (!Number.isFinite(end) || end < start) {
-            end = start + 3;
-          }
-          const fontSize = Number.isFinite(Number(a.fontSize))
-            ? Number(a.fontSize)
-            : 24;
-          const x = Number.isFinite(Number(a.x)) ? Number(a.x) : 0;
-          const y = Number.isFinite(Number(a.y)) ? Number(a.y) : 50;
+    // useEffect(() => {
+    //   let repaired = false;
+    //   const newTracks = tracks.map((track) => {
+    //     const newActions = track.actions.map((a) => {
+    //       const start = Number.isFinite(Number(a.start)) ? Number(a.start) : 0;
+    //       let end = Number.isFinite(Number(a.end)) ? Number(a.end) : NaN;
+    //       if (!Number.isFinite(end) || end < start) {
+    //         end = start + 3;
+    //       }
+    //       const fontSize = Number.isFinite(Number(a.fontSize))
+    //         ? Number(a.fontSize)
+    //         : 24;
+    //       const x = Number.isFinite(Number(a.x)) ? Number(a.x) : 0;
+    //       const y = Number.isFinite(Number(a.y)) ? Number(a.y) : 50;
 
-          if (
-            start !== a.start ||
-            end !== a.end ||
-            fontSize !== a.fontSize ||
-            x !== a.x ||
-            y !== a.y
-          ) {
-            repaired = true;
-            return { ...a, start, end, fontSize, x, y };
-          }
-          return a;
-        });
-        return { ...track, actions: newActions };
-      });
+    //       if (
+    //         start !== a.start ||
+    //         end !== a.end ||
+    //         fontSize !== a.fontSize ||
+    //         x !== a.x ||
+    //         y !== a.y
+    //       ) {
+    //         repaired = true;
+    //         return { ...a, start, end, fontSize, x, y };
+    //       }
+    //       return a;
+    //     });
+    //     return { ...track, actions: newActions };
+    //   });
 
-      if (repaired) setTracks(newTracks);
-    }, [tracks]);
+    //   if (repaired) setTracks(newTracks);
+    // }, [tracks]);
 
     const handleTimelineChange = useCallback(
       (trackId, actionId, newStart, newY = null) => {
@@ -2254,69 +2254,110 @@ const handleUnifiedProcessComplete = (result) => {
         <h2>🎬 Video Editor</h2>
 
         <YouTubePreview url="" /> 
+        
+       {/* Video Container */}
+<div
+  ref={videoContainerRef}
+  style={{
+    position: "relative",
+    width: 640,
+    height: splitMode ? "auto" : 360,
+    marginTop: 10,
+    marginLeft: "auto",
+    marginRight: "auto",
+    border: "2px solid #444",
+    background: "#000",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1
+  }}
+>
+  {isLoadingFrames && (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}
+    >
+      <Loader />
+    </div>
+  )}
 
-        <div
-        ref={videoContainerRef}
-        style={{
-          position: "relative",
-          width: 640, // Fixed container width
-          height: splitMode ? "auto" : 360, // Fixed container height
-          marginTop: 10,
-          marginLeft: "auto",
-          marginRight: "auto",
-          border: "2px solid #444",
-          background: "#000",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-          {isLoadingFrames && (
+  {!splitMode && (
+    (mainVideoSource || videoSrc) ? (
+      <div className="editor-root" style={{ position: "relative", width: 640, height: 360 }}>    
+        <div className="video-area" style={{ position: "relative", width: "100%", height: "100%" }}> 
+          <VideoPlayer
+            ref={videoRef}
+            src={mainVideoSource || videoSrc}
+            muted={false}
+            width={640}
+            height={360}
+            controls
+            preload="auto" 
+            style={{
+              position: "relative",
+              zIndex: 10,
+              objectFit: "contain",
+              background: "#000",
+              width: "100%",
+              height: "100%",
+              display: "block"
+            }}
+            onLoadedMetadata={(e) => { 
+              setDuration(e.target.duration);
+              setVideoWidthPx(e.target.videoWidth);
+              setVideoHeightPx(e.target.videoHeight);
+              setVideoDuration(e.target.duration);
+              calculateRenderedDimensions(e.target);
+            }}
+          /> 
+
+          {/* ✅ OVERLAY INSIDE video-area */}
+          {renderedVideoWidth > 0 && renderedVideoHeight > 0 && (
             <div
               style={{
                 position: "absolute",
-              //position: "relative",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                background: "rgba(0,0,0,0.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 1000,
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: renderedVideoWidth,
+                height: renderedVideoHeight,
+                pointerEvents: "auto",
+                zIndex: 100,
               }}
             >
-              <Loader />
+              <div style={{ position: "relative", width: "100%", height: "100%", pointerEvents: "auto"  }}
+               onMouseDown={(e) => e.stopPropagation()}
+              >
+                <VideoOverlayKonva
+                  videoWidth={renderedVideoWidth}
+                  videoHeight={renderedVideoHeight}
+                  containerWidth={640}
+                  containerHeight={360}
+                  videoDuration={duration}
+                  tracks={tracks}
+                  selectedActionId={selectedAction?.id}
+                  setSelectedActionId={setSelectedActionById}
+                  onUpdateAction={handleUpdateAction}
+                  currentTime={currentTime}
+                  imageOverlays={imageOverlays} 
+                  onUpdateImageOverlay={handleUpdateImageOverlay}
+                  videoRef={videoRef}
+                />
+              </div>
             </div>
           )}
-
-          {!splitMode && (  
-            <div className="editor-root" 
-            //style={{ position: "relative", width: videoWidthPx || 640,display: "inline-block" }} 
-            >
-             <div className="video-area"> 
-            <VideoPlayer
-              //key={activeVideoSrc}
-              ref={videoRef}
-              src={activeVideoSrc}
-              muted={false}
-              width={640}
-              height={360}
-              controls
-              preload="auto" 
-              style = {{zIndex: 1,objectFit:"contain",background: "#000" ,maxWidth: "100%",
-                  maxHeight: "100%"}}
-              onLoadedMetadata={(e) => { 
-                setDuration(e.target.duration);
-                setVideoWidthPx(e.target.videoWidth);
-                setVideoHeightPx(e.target.videoHeight);
-                setVideoDuration(e.target.duration);
-                calculateRenderedDimensions(e.target);
-              }}
-            /> 
-            </div> 
-            {/* ✅ Hidden audio element */}
+        
           {addedAudioSrc && (
             <audio
               ref={addedAudioRef}
@@ -2328,190 +2369,32 @@ const handleUnifiedProcessComplete = (result) => {
             />
           )}
         </div>
-          )}
-
-{!splitMode && (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: videoWidthPx || 640,
-            height: videoHeightPx || 440,
-            //pointerEvents: "auto",
-             pointerEvents: selectedAction ? "auto" : "none",
-            zIndex: 5,
-          }}
-        >
-          {renderedVideoWidth > 0 && renderedVideoHeight > 0 && (
-            <VideoOverlayKonva
-              videoWidth={renderedVideoWidth}
-              videoHeight={renderedVideoHeight}
-              containerWidth={640}
-              containerHeight={360}
-              videoDuration={duration}
-              tracks={tracks}
-              selectedActionId={selectedAction?.id}
-              setSelectedActionId={setSelectedActionById}
-              onUpdateAction={handleUpdateAction}
-              currentTime={currentTime}
-              imageOverlays={imageOverlays} 
-              onUpdateImageOverlay={handleUpdateImageOverlay}
-            />
-          )}
-        </div>
-      )} 
-       {splitMode && (
-  <div
-    style={{
-      display: "flex",
-      flexDirection: "column",
-      width: videoWidthPx || 640,
-      gap: 8,
-      position: "relative",
-      background: "#000"
-    }}
-  >
-    {/* TOP VIDEO - Main Video */}
-    <div style={{ position: "relative", background: "#1a1a1a" }}>
-      <div style={{ 
-        color: "#fff", 
-        fontSize: 12, 
-        margin: 0, 
-        padding: "5px 10px",
-        background: "#3b82f6",
-        fontWeight: "bold"
-      }}>
-        🔝 Top Video {serverFilename && `(${serverFilename})`}
-      </div>
-      <video
-        ref={videoRef}
-        // ✅ CRITICAL: Use explicit source priority
-        src={mainVideoSource || blobUrl || videoSrc}
-        controls
-        muted={false}
-        autoPlay={false}
-        playsInline
-        onLoadedMetadata={(e) => {
-          console.log("✅ Top video loaded in split mode:", {
-            src: e.target.src,
-            currentSrc: e.target.currentSrc,
-            duration: e.target.duration,
-            readyState: e.target.readyState
-          });
-          setDuration(e.target.duration);
-          setVideoWidthPx(e.target.videoWidth);
-          setVideoHeightPx(e.target.videoHeight);
-          setVideoDuration(e.target.duration);
-        }}
-        onError={(e) => {
-          console.error("❌ Top video failed to load:", e);
-          console.log("📊 Available sources:", {
-            mainVideoSource,
-            blobUrl,
-            videoSrc,
-            serverFilename
-          });
-          // Try fallback sources
-          if (!mainVideoSource && videoSrc) {
-            console.log("🔄 Trying videoSrc as fallback");
-            e.target.src = videoSrc;
-          }
-        }}
-        onCanPlay={() => {
-          console.log("✅ Top video can play");
-        }}
-        style={{
-          width: "100%",
-          height: 220,
-          display: "block",
-          background: "#000",
-          objectFit: "contain",
-        }}
-      />
-    </div>
-
-    {/* BOTTOM VIDEO - Second Video */}
-    {secondVideoSrc ? (
-      <div style={{ position: "relative", background: "#1a1a1a" }}>
-        <div style={{ 
-          color: "#fff", 
-          fontSize: 12, 
-          margin: 0, 
-          padding: "5px 10px",
-          background: "#8b5cf6",
-          fontWeight: "bold"
-        }}>
-          🔽 Bottom Video {splitScreenConfig.bottomVideoFilename && `(${splitScreenConfig.bottomVideoFilename})`}
-        </div>
-        <video
-          ref={secondVideoRef}
-          src={secondVideoSrc}
-          controls
-          muted={false}
-          autoPlay={false}
-          playsInline
-          onLoadedMetadata={(e) => {
-            console.log("✅ Bottom video loaded:", {
-              src: e.target.src,
-              currentSrc: e.target.currentSrc,
-              duration: e.target.duration,
-              readyState: e.target.readyState
-            });
-          }}
-          onError={(e) => {
-            console.error("❌ Bottom video failed to load:", e);
-            console.log("📊 Bottom video source:", secondVideoSrc);
-          }}
-          onCanPlay={() => {
-            console.log("✅ Bottom video can play");
-          }}
-          style={{
-            width: "100%",
-            height: 220,
-            display: "block",
-            background: "#000",
-            objectFit: "contain",
-          }}
-        />
       </div>
     ) : (
-      <div style={{ 
-        width: "100%", 
-        height: 220, 
-        background: "#374151",
+      <div style={{
+        width: 640,
+        height: 360,
+        background: "#1a1a1a",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        flexDirection: "column",
-        gap: 10,
-        color: "#9ca3af"
+        gap: 20,
+        border: "2px dashed #374151",
+        borderRadius: 8
       }}>
-        <p style={{ margin: 0, fontSize: 18 }}>⚠️ No bottom video loaded</p>
-        <p style={{ margin: 0, fontSize: 14 }}>Upload a second video to enable split-screen</p>
-      </div>
-    )}
-    
-    {/* Debug Info Panel */}
-    <div style={{
-      padding: 10,
-      background: "#1f2937",
-      borderRadius: 4,
-      fontSize: 11,
-      color: "#9ca3af",
-      fontFamily: "monospace"
-    }}>
-      <strong style={{ color: "#60a5fa" }}>🐛 Debug Info:</strong>
-      <div>Split Mode: {splitMode ? "✅ Active" : "❌ Inactive"}</div>
-      <div>Main Video Source: {mainVideoSource ? "✅ blob" : blobUrl ? "blob (fallback)" : videoSrc ? "stream" : "❌ MISSING"}</div>
-      <div>Bottom Video Source: {secondVideoSrc ? "✅ blob" : "❌ none"}</div>
-      <div>Server Filename: {serverFilename || "❌ none"}</div>
-      <div>Bottom Filename: {splitScreenConfig.bottomVideoFilename || "❌ none"}</div>
-    </div>
-  </div> 
-  )}
+        <div style={{ fontSize: 64, color: "#4b5563" }}>🎬</div>
+        <div style={{ fontSize: 18, color: "#9ca3af", fontWeight: "bold" }}>
+          No Video Loaded
         </div>
-
+        <div style={{ fontSize: 14, color: "#6b7280", textAlign: "center", maxWidth: 400 }}>
+          Click the "📹 Upload Video" button below to get started
+        </div>
+      </div> 
+    )
+    
+  )} </div>
+  
         <input
           type="file"
           ref={audioInputRef}
@@ -2545,21 +2428,7 @@ const handleUnifiedProcessComplete = (result) => {
             e.target.value = "";
           }}
         />
-
-        {/* ✅ IMPROVED: Timeline with scroll sync */}
-        {/* <div
-          ref={timelineScrollRef}
-          style={{
-            overflowX: "auto",
-            overflowY: "hidden",
-            background: "#222",
-            maxWidth: "100%",
-            marginTop: 20,
-            border: "1px solid #555",
-            position: "relative",
-            pointerEvents: "auto"
-          }}
-        > */}
+ 
       <div 
         style={{
           width: 640, // ✅ Match video player width exactly
@@ -2711,21 +2580,65 @@ const handleUnifiedProcessComplete = (result) => {
     </div>
   </div>
      
-       {selectedAction && selectedAction.type === "text" && (
-                <div style={{ marginTop: 10 }}>
-                    <input
-                    type="text"
-                    placeholder="Edit overlay text"
-                    value={selectedAction.text || ""}
-                    onChange={(e) =>
-                        handleUpdateAction(selectedAction.id, {
-                        text: e.target.value,
-                        })
-                    }
-                    style={{ padding: 5, width: 250 }}
-                    />
-                </div>
-                )}
+      {selectedAction && selectedAction.type === "text" && (
+  <div style={{ marginTop: 10, padding: 10, background: "#2a2a2a", borderRadius: 4 }}>
+    <h4 style={{ color: "#60a5fa", marginTop: 0 }}>Edit Text Overlay</h4>
+    
+    {/* Text content */}
+    <input
+      type="text"
+      placeholder="Edit overlay text"
+      value={selectedAction.text || ""}
+      onChange={(e) =>
+        handleUpdateAction(selectedAction.id, {
+          text: e.target.value,
+        })
+      }
+      style={{ padding: 5, width: 250, marginBottom: 10 }}
+    />
+    
+    {/* Start time */}
+    <div style={{ marginBottom: 10 }}>
+      <label style={{ color: "#9ca3af", marginRight: 10 }}>Start Time (s):</label>
+      <input
+        type="number"
+        min="0"
+        max={videoDuration}
+        step="0.1"
+        value={selectedAction.start || 0}
+        onChange={(e) =>
+          handleUpdateAction(selectedAction.id, {
+            start: parseFloat(e.target.value) || 0
+          })
+        }
+        style={{ padding: 5, width: 100 }}
+      />
+    </div>
+    
+    {/* End time */}
+    <div style={{ marginBottom: 10 }}>
+      <label style={{ color: "#9ca3af", marginRight: 10 }}>End Time (s):</label>
+      <input
+        type="number"
+        min="0"
+        max={videoDuration}
+        step="0.1"
+        value={selectedAction.end || 0}
+        onChange={(e) =>
+          handleUpdateAction(selectedAction.id, {
+            end: parseFloat(e.target.value) || 0
+          })
+        }
+        style={{ padding: 5, width: 100 }}
+      />
+    </div>
+    
+    {/* Duration display */}
+    <div style={{ color: "#6b7280", fontSize: 12 }}>
+      Duration: {((selectedAction.end || 0) - (selectedAction.start || 0)).toFixed(2)}s
+    </div>
+  </div>
+)}
 
 
         <button onClick={handleAddTextOverlay} style={{ marginTop: 10 }}>
@@ -3395,8 +3308,7 @@ const handleUnifiedProcessComplete = (result) => {
       <h3>🧩 Merge Videos</h3>
       <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
       
-    </div> 
-    
+    </div>  
   );
 }
 

@@ -10,7 +10,7 @@ function UnifiedPipelineForm({
   imageOverlays,
   insertVideos,
   splitScreenConfig,
-  onProcessComplete  
+  onProcessComplete  ,videoDuration
 }) {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -165,13 +165,34 @@ function UnifiedPipelineForm({
     console.log('✅ Adding text_overlays task');
     payload.text_overlays = {
       enabled: true,
-      overlays: textTrack.actions
+      overlays: textTrack.actions.map((action, idx) => {
+        const start = parseFloat(action.start);
+        const end = parseFloat(action.end);
+        const fontSize = parseFloat(action.fontSize);
+        const x = parseFloat(action.x);
+        const y = parseFloat(action.y);
+        
+        const result = {
+          text: String(action.text || "New Text"),
+          start: Number.isFinite(start) ? start : 0,
+          end: Number.isFinite(end) ? end : 5,
+          fontsize: Number.isFinite(fontSize) ? fontSize : 24,
+          fontcolor: String(action.color || "white"),
+          position: "custom",
+          x: Number.isFinite(x) ? x : 0,
+          y: Number.isFinite(y) ? y : 50
+        };
+        
+        console.log(`📝 Text overlay ${idx}:`, result);
+        return result;
+      })
     };
   }
 
   // Video inserts (PIP)
   if (tasks.video_inserts && videoOverlays?.length > 0) {
   console.log('✅ Adding video_inserts task');
+  
   payload.multiple_inserts = {   
     enabled: true,
     inserts: videoOverlays.map(overlay => ({   
@@ -195,9 +216,50 @@ function UnifiedPipelineForm({
   // Image overlays
   if (tasks.image_overlays && imageOverlays?.length > 0) {
     console.log('✅ Adding image_overlays task');
+    
+    const maxDuration = parseFloat(videoDuration) || 999999;
+    
     payload.image_overlays = {
       enabled: true,
-      overlays: imageOverlays
+      overlays: imageOverlays.map((overlay, idx) => {
+        const start = parseFloat(overlay.start);
+        const end = parseFloat(overlay.end);
+        const x = parseFloat(overlay.position?.x);
+        const y = parseFloat(overlay.position?.y);
+        const width = parseFloat(overlay.size?.width);
+        const height = parseFloat(overlay.size?.height);
+        const opacity = parseFloat(overlay.opacity);
+        const fadeIn = parseFloat(overlay.fadeIn);
+        const fadeOut = parseFloat(overlay.fadeOut);
+        
+        const validStart = Number.isFinite(start) ? Math.max(0, start) : 0;
+        const validEnd = Number.isFinite(end) ? Math.min(end, maxDuration) : (validStart + 5);
+        
+        const result = {
+          image_filename: String(overlay.serverFilename || 'unknown.png'),
+          start: validStart,
+          end: validEnd,
+          x: Number.isFinite(x) ? Math.max(0, Math.round(x)) : 0,
+          y: Number.isFinite(y) ? Math.max(0, Math.round(y)) : 0,
+          width: Number.isFinite(width) ? Math.round(width) : 100,
+          height: Number.isFinite(height) ? Math.round(height) : 100,
+          opacity: Number.isFinite(opacity) ? opacity : 1.0,
+          fade_in: Number.isFinite(fadeIn) ? fadeIn : 0.0,
+          fade_out: Number.isFinite(fadeOut) ? fadeOut : 0.0
+        };
+        
+        console.log(`🖼️ Image overlay ${idx}:`, result);
+        
+        // ✅ Final validation - make sure NO field is null/undefined
+        Object.keys(result).forEach(key => {
+          if (result[key] === null || result[key] === undefined || !Number.isFinite(result[key]) && typeof result[key] === 'number') {
+            console.error(`❌ Invalid value for ${key}:`, result[key]);
+            throw new Error(`Image overlay ${idx}: ${key} is invalid (${result[key]})`);
+          }
+        });
+        
+        return result;
+      })
     };
   }
 

@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+outputs/
+videos/
+*.mp4
+*.mov
+*.avi
+*.mkv
+node_modules/
+dist/
+build/

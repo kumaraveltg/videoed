@@ -2,72 +2,91 @@ import React, { useRef, useEffect, useState } from "react";
 import { Stage, Layer, Group, Rect, Text, Transformer, Image as KonvaImage } from "react-konva";
 
 const VideoOverlayKonva = ({
-  videoWidth,
-  videoHeight,
+  videoWidth: containerWidth,
+  videoHeight: containerHeight,
   videoDuration,
-  tracks,
+  tracks = [],
   selectedActionId,
   setSelectedActionId,
   onUpdateAction,
-  currentTime, imageOverlays = [], onUpdateImageOverlay,
+  currentTime,
+  imageOverlays = [],
+  onUpdateImageOverlay,
+  videoRef
 }) => {
   const transformerRef = useRef();
   const groupRefs = useRef({});
   const [images, setImages] = useState({});
 
-  // attach transformer to selected group
+  // Attach transformer to selected group
   useEffect(() => {
-    const node = groupRefs.current[selectedActionId]?.current;
-    if (!transformerRef.current) return;
+    if (!transformerRef.current || !selectedActionId) return;
 
-    transformerRef.current.nodes(node ? [node] : []);
+    const groupRef = groupRefs.current[selectedActionId];
+    if (!groupRef || !groupRef.current) return;
+
+    transformerRef.current.nodes([groupRef.current]);
     transformerRef.current.getLayer()?.batchDraw();
-  }, [selectedActionId, tracks]);
+  }, [selectedActionId, tracks, imageOverlays]);
 
   // Load images for image overlays
   useEffect(() => {
-    const imageTrack = tracks.find(t => t.type === "image");
-    if (!imageTrack) return;
-
-    imageTrack.actions.forEach(action => {
-      if (!action.src || images[action.id]) return;
-
+    imageOverlays.forEach((overlay) => {
+      if (!overlay.src || images[overlay.id]) return;
       const img = new window.Image();
-      img.src = action.src;
+      img.src = overlay.src;
       img.onload = () => {
-        setImages(prev => ({
-          ...prev,
-          [action.id]: img
-        }));
+        setImages(prev => ({ ...prev, [overlay.id]: img }));
       };
     });
-  }, [tracks, images]);
+  }, [imageOverlays, images]);
+
+  // ✅ DEBUG: Log current state
+  console.log('📊 VideoOverlayKonva State:', {
+    currentTime,
+    videoDuration,
+    textActions: tracks.filter(t => t.type === "text").flatMap(t => t.actions || []),
+    imageOverlays,
+    containerWidth,
+    containerHeight
+  });
 
   return (
-    <Stage width={videoWidth} height={videoHeight}>
+    <Stage
+      width={containerWidth}
+      height={containerHeight}
+      style={{ 
+        position: "absolute", 
+        top: 0, 
+        left: 0, 
+        pointerEvents: "auto"
+      }}
+    >
       <Layer>
-        {/* TEXT OVERLAYS */}
+        {/* TEXT OVERLAYS - Timeline based */}
         {tracks
           .filter(t => t.type === "text")
-          .flatMap(t => t.actions)
+          .flatMap(t => t.actions || [])
           .filter(action => {
-            // ✅ Only show if within time range
             const start = action.start ?? 0;
             const end = action.end ?? start + 2;
-            return currentTime >= start && currentTime <= end;
+            const isVisible = currentTime >= start && currentTime <= end;
+            
+            // ✅ DEBUG: Log each text action
+            console.log(`📝 Text "${action.text}": start=${start}s, end=${end}s, currentTime=${currentTime}s, visible=${isVisible}`);
+            
+            return isVisible;
           })
           .map(action => {
-            if (!groupRefs.current[action.id]) {
-              groupRefs.current[action.id] = React.createRef();
-            }
+            if (!groupRefs.current[action.id]) groupRefs.current[action.id] = React.createRef();
 
-            const start = action.start ?? 0;
-            const end = action.end ?? start + 2;
             const fontSize = action.fontSize ?? 24;
-
-            const width = ((end - start) / videoDuration) * videoWidth;
-            const x = (start / videoDuration) * videoWidth;
+            const width = Math.max(100, fontSize * (action.text?.length || 5) * 0.6);
+            
+            const x = action.x ?? 50;
             const y = action.y ?? 50;
+
+            console.log(`✅ Rendering text "${action.text}" at (${x}, ${y})`);
 
             return (
               <Group
@@ -75,26 +94,20 @@ const VideoOverlayKonva = ({
                 ref={groupRefs.current[action.id]}
                 x={x}
                 y={y}
-                width={width}
-                height={fontSize + 10}
                 draggable
                 onClick={() => setSelectedActionId(action.id)}
                 onTap={() => setSelectedActionId(action.id)}
                 onDragEnd={e => {
-                  const newStart = (e.target.x() / videoWidth) * videoDuration;
-                  const duration = end - start;
-
                   onUpdateAction(action.id, {
-                    start: newStart,
-                    end: newStart + duration,
-                    y: e.target.y(),
+                    x: e.target.x(),
+                    y: e.target.y()
                   });
                 }}
               >
                 <Rect
                   width={width}
                   height={fontSize + 10}
-                  fill="rgba(0,0,0,0.35)"
+                  fill="rgba(0,0,0,0.5)"
                   cornerRadius={4}
                 />
                 <Text
@@ -105,183 +118,142 @@ const VideoOverlayKonva = ({
                   height={fontSize + 10}
                   align="center"
                   verticalAlign="middle"
+                  padding={5}
                 />
               </Group>
             );
           })}
 
-        {/* IMAGE OVERLAYS */}
+        {/* IMAGE OVERLAYS - Timeline based */}
         {imageOverlays
-    .filter(overlay => {
-      // ✅ Only show if within time range
-      const start = overlay.start ?? 0;
-      const end = overlay.end ?? start + 5;
-      return currentTime >= start && currentTime <= end;
-    })
-    .map(overlay => {
-      if (!groupRefs.current[overlay.id]) {
-        groupRefs.current[overlay.id] = React.createRef();
-      }
-
-      const x = overlay.position?.x ?? 20;
-      const y = overlay.position?.y ?? 20;
-      const width = overlay.size?.width ?? 150;
-      const height = overlay.size?.height ?? 150;
-      const opacity = overlay.opacity ?? 1;
-
-      const image = images[overlay.id];
-      if (!image) {
-        console.log('⚠️ Image not loaded yet for overlay:', overlay.id);
-        return null;
-      }
-
-      console.log('✅ Rendering image overlay:', overlay.id, { x, y, width, height });
-
-      return (
-        <Group
-          key={overlay.id}
-          ref={groupRefs.current[overlay.id]}
-          x={x}
-          y={y}
-          draggable
-          onClick={(e) => {
-            console.log('🖼️ Image clicked:', overlay.id);
-            e.cancelBubble = true;
-            setSelectedActionId(overlay.id);
-          }}
-          onTap={(e) => {
-            console.log('🖼️ Image tapped:', overlay.id);
-            e.cancelBubble = true;
-            setSelectedActionId(overlay.id);
-          }}
-          onDragStart={() => {
-            console.log('🖼️ Image drag started:', overlay.id);
-          }}
-          onDragEnd={e => {
-            console.log('🖼️ Image drag ended:', overlay.id, {
-              x: e.target.x(),
-              y: e.target.y()
-            });
+          .filter(overlay => {
+            const start = overlay.start ?? 0;
+            const end = overlay.end ?? start + 5;
+            const isVisible = currentTime >= start && currentTime <= end;
             
-            onUpdateImageOverlay(overlay.id, {
-              position: {
-                x: e.target.x(),
-                y: e.target.y(),
-              },
-            });
-          }}
-        >
-          <KonvaImage
-            image={image}
-            width={width}
-            height={height}
-            opacity={opacity}
-          />
-          
-          {/* Selection border */}
-          {selectedActionId === overlay.id && (
-            <Rect
-              width={width}
-              height={height}
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dash={[5, 5]}
-              listening={false}
-            />
-          )}
-        </Group>
-      );
-    })}
+            // ✅ DEBUG: Log each image overlay
+            console.log(`🖼️ Image ${overlay.id}: start=${start}s, end=${end}s, currentTime=${currentTime}s, visible=${isVisible}, hasImage=${!!images[overlay.id]}`);
+            
+            return isVisible;
+          })
+          .map(overlay => {
+            if (!groupRefs.current[overlay.id]) {
+              groupRefs.current[overlay.id] = React.createRef();
+            }
 
-        {/* RESIZE HANDLES */}
+            const x = overlay.position?.x ?? 20;
+            const y = overlay.position?.y ?? 20;
+            const width = overlay.size?.width ?? 150;
+            const height = overlay.size?.height ?? 150;
+            const opacity = overlay.opacity ?? 1;
+
+            const image = images[overlay.id];
+            if (!image) {
+              console.log(`⚠️ Image not loaded for overlay ${overlay.id}`);
+              return null;
+            }
+
+            console.log(`✅ Rendering image ${overlay.id} at (${x}, ${y})`);
+
+            return (
+              <Group
+                key={overlay.id}
+                ref={groupRefs.current[overlay.id]}
+                x={x}
+                y={y}
+                draggable
+                onClick={e => { 
+                  e.cancelBubble = true; 
+                  setSelectedActionId(overlay.id); 
+                }}
+                onTap={e => { 
+                  e.cancelBubble = true; 
+                  setSelectedActionId(overlay.id); 
+                }}
+                onDragEnd={e => {
+                  onUpdateImageOverlay(overlay.id, {
+                    position: {
+                      x: e.target.x(),
+                      y: e.target.y()
+                    }
+                  });
+                }}
+              >
+                <KonvaImage
+                  image={image}
+                  width={width}
+                  height={height}
+                  opacity={opacity}
+                />
+                {selectedActionId === overlay.id && (
+                  <Rect
+                    width={width}
+                    height={height}
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dash={[5, 5]}
+                    listening={false}
+                  />
+                )}
+              </Group>
+            );
+          })}
+
+        {/* TRANSFORMER */}
         <Transformer
           ref={transformerRef}
           rotateEnabled={false}
           keepRatio={false}
-          enabledAnchors={(() => {
-            const selectedAction = tracks
-              .flatMap(t => t.actions)
-              .find(a => a.id === selectedActionId);
-            
-            if (!selectedAction) return [];
-            
-            return selectedAction.type === "text"
-              ? ["middle-left", "middle-right"]
-              : ["top-left", "top-right", "bottom-left", "bottom-right"];
-          })()}
+          enabledAnchors={
+            (() => {
+              const allActions = tracks.flatMap(t => t.actions || []);
+              const textAction = allActions.find(a => a.id === selectedActionId);
+              const imageOverlay = imageOverlays.find(o => o.id === selectedActionId);
+              
+              const selected = textAction || imageOverlay;
+              if (!selected) return [];
+              
+              const isText = selected.type === "text" || textAction;
+              
+              return isText
+                ? ["middle-left", "middle-right"]
+                : ["top-left", "top-right", "bottom-left", "bottom-right"];
+            })()
+          }
           boundBoxFunc={(oldBox, newBox) => ({
             ...newBox,
             width: Math.max(20, newBox.width),
-            height: Math.max(20, newBox.height),
+            height: Math.max(20, newBox.height)
           })}
           onTransformEnd={() => {
-            console.log('🔧 Transform ended for:', selectedActionId);
-            
             const group = groupRefs.current[selectedActionId]?.current;
-            if (!group) {
-              console.log('❌ No group found');
-              return;
-            }
+            if (!group) return;
 
-            const action = tracks
-              .flatMap(t => t.actions)
-              .find(a => a.id === selectedActionId);
-
-            if (!action) {
-              console.log('❌ No action found');
-              return;
-            }
-
-            console.log('📊 Action type:', action.type);
-
-            // Handle text overlay resize (duration-based)
-            if (action.type === "text") {
-              const scaleX = group.scaleX();
-              const newWidthPx = group.width() * scaleX;
-              
-              group.scaleX(1);
-
-              const newDuration = (newWidthPx / videoWidth) * videoDuration;
-
-              console.log('📝 Text resize:', { newDuration });
-
-              onUpdateAction(action.id, {
-                end: action.start + Math.max(0.2, newDuration),
-              });
-            }
+            const allActions = tracks.flatMap(t => t.actions || []);
+            const textAction = allActions.find(a => a.id === selectedActionId);
+            const imageOverlay = imageOverlays.find(o => o.id === selectedActionId);
             
-           
-           // Handle image overlay resize (size-based)
-        else if (action.type === "image") {
-          const scaleX = group.scaleX();
-          const scaleY = group.scaleY();
+            const action = textAction || imageOverlay;
+            if (!action) return;
 
-          const newWidth = action.size.width * scaleX;
-          const newHeight = action.size.height * scaleY;
-
-          console.log('🖼️ Image resize:', { 
-            scaleX, 
-            scaleY, 
-            oldWidth: action.size.width,
-            oldHeight: action.size.height,
-            newWidth, 
-            newHeight 
-          });
-
-          // Reset scale to 1
-          group.scaleX(1);
-          group.scaleY(1);
-
-          // ✅ Use onUpdateImageOverlay instead of onUpdateAction
-          if (onUpdateImageOverlay) {
-            onUpdateImageOverlay(action.id, {
-              size: {
-                width: Math.max(20, newWidth),
-                height: Math.max(20, newHeight),
-              },
-            });
-          }}} 
-                }
+            if (textAction) {
+              group.scaleX(1);
+              group.scaleY(1);
+            } else if (imageOverlay) {
+              const scaleX = group.scaleX();
+              const scaleY = group.scaleY();
+              const newWidth = (action.size?.width ?? 150) * scaleX;
+              const newHeight = (action.size?.height ?? 150) * scaleY;
+              group.scaleX(1);
+              group.scaleY(1);
+              
+              if (onUpdateImageOverlay) {
+                onUpdateImageOverlay(action.id, {
+                  size: { width: Math.max(20, newWidth), height: Math.max(20, newHeight) }
+                });
+              }
+            }
+          }}
         />
       </Layer>
     </Stage>

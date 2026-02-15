@@ -89,6 +89,7 @@
   max-height: 100%;
   object-fit: contain; /* ✅ Maintains aspect ratio */
   display: block;
+  z-index: 1;
 }
 
 /* ✅ NEW: Centered editor layout */

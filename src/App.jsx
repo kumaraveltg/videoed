@@ -1,7 +1,6 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import VideoEditor from "./pages/VideoEditor";
-
 function App() {
   return (
     <BrowserRouter>
