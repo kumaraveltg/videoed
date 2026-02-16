@@ -389,7 +389,7 @@ Frame.displayName = 'Frame';
         fontWeight: "bold"
       }}
     >
-      ➕ Add Insert Video
+      ➕ Insert Videos
     </button> 
     
     {razorMode && (

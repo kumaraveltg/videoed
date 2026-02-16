@@ -10,12 +10,16 @@ function UnifiedPipelineForm({
   imageOverlays,
   insertVideos,
   splitScreenConfig,
-  onProcessComplete  ,videoDuration
+  onProcessComplete  ,videoDuration,setMainVideo,setFile,  
+  setMainVideoSource,   
+  setBlobUrl,   
+  setVideoSrc, onClearTimeline
 }) {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [backendError, setBackendError] = useState(null);
+
   const [selectedTasks, setSelectedTasks] = useState({
   trim: false,
   text_overlays: false,
@@ -27,13 +31,14 @@ function UnifiedPipelineForm({
   });
   const [outputQuality, setOutputQuality] = useState('medium');
   const [outputCrf, setOutputCrf] = useState(23);
-  const [outputName, setOutputName] = useState(''); // ✅ ADDED: Missing state
+  const [outputName, setOutputName] = useState('');  
   const [debugInfo, setDebugInfo] = useState(null);
   const [showFullPayload, setShowFullPayload] = useState(false);
   const [lastPayload, setLastPayload] = useState(null); 
   const [mainVideoPath, setMainVideoPath] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadedAudioFilename, setUploadedAudioFilename] = useState(null); // ✅ ADDED: Track uploaded audio
+  const [uploadedAudioFilename, setUploadedAudioFilename] = useState(null); 
+  const [showSucessModal,setShowSuccessModal]= useState(false);
 
   useEffect(() => {
     const uploadMainVideo = async () => {
@@ -422,6 +427,7 @@ function UnifiedPipelineForm({
 
   try {
     // ✅ Upload audio file if needed (BEFORE building payload)
+     let currentAudioFilename = null;
     if (updatedSelectedTasks.audio_control && 
         audioMode === 'replace' && 
         addedAudioFile) {
@@ -441,6 +447,7 @@ function UnifiedPipelineForm({
       }
       
       const audioData = await audioResponse.json();
+      currentAudioFilename = audioData.filename;
       setUploadedAudioFilename(audioData.filename);
       
       console.log('✅ Audio uploaded:', audioData.filename);
@@ -503,55 +510,78 @@ function UnifiedPipelineForm({
 
   const handleDownloadAndCleanup = async (result) => {
   try {
-    console.log('📥 Starting download...');
+    if (!result || !result.output) {
+      alert('Error: No video file to download');
+      return;
+    }
     
-    const downloadUrl = `http://localhost:8000/video/download/${result.output}`;
+    console.log('📥 Downloading:', result.output);
     
-    // Fetch the file as blob
-    const response = await fetch(downloadUrl);
+    // Download the video
+    const downloadResponse = await fetch(
+      `http://localhost:8000/video/download/${result.output}`
+    );
     
-    if (!response.ok) {
+    if (!downloadResponse.ok) {
       throw new Error('Download failed');
     }
     
-    // Convert to blob
-    const blob = await response.blob();
-    
-    // Create a download link
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = result.output || 'processed_video.mp4';
-    link.style.display = 'none';
-    
-    document.body.appendChild(link);
-    link.click();
-    
-    // Cleanup
+    // ✅ Clear the video from UI
+    setResult(null);  // Reset result state 
+    setMainVideo(null);
+    setUploading(false); 
+    setMainVideo(null);
+    setFile(null); 
+    setBlobUrl(null);
+    setVideoSrc(null);  
+    setMainVideoSource(null);
+     
+     if (onClearTimeline) {
+       console.log('🧹 Calling onClearTimeline from download...');
+      onClearTimeline(); // ✅ Clear timeline too
+    }
+    // Show success message
+    setShowSuccessModal(true);
     setTimeout(() => {
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-    }, 100);
+      setShowSuccessModal(false);
+    }, 3000);
+
+    // Create blob and trigger download
+    const blob = await downloadResponse.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = result.output;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
     
-    console.log('✅ Download complete');
+    console.log('✅ Download successful');
+
+     
+ 
     
-    // Now cleanup server files
-    await fetch('http://localhost:8000/video/cleanup', {
+    
+    // Cleanup - delete file from uploads
+    const cleanupResponse = await fetch('http://localhost:8000/video/cleanup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        filename: result.output,
-        cleanup_uploads: true,
-        cleanup_outputs: true
+        filename: result.output
       })
     });
     
-    alert('✅ Video downloaded successfully!');
-    setResult(null);
+    if (cleanupResponse.ok) {
+      const cleanupData = await cleanupResponse.json();
+      console.log('🗑️', cleanupData.message);
+    }
     
-  } catch (err) {
-    console.error('❌ Download error:', err);
-    alert('Error: ' + err.message);
+   
+    
+  } catch (error) {
+    console.error('❌ Download error:', error);
+    alert(`Download failed: ${error.message}`);
   }
 };
 
@@ -564,7 +594,7 @@ function UnifiedPipelineForm({
       border: '2px solid #3b82f6'
     }}>
       <h3 style={{ color: '#60a5fa', marginTop: 0 }}>
-        🎬 Unified Pipeline - Process All Edits
+        🎬 Export - Process All Edits
       </h3>
 
       {/* Debug Panel */}
@@ -596,7 +626,6 @@ function UnifiedPipelineForm({
             <div><strong>Audio File:</strong> {debugInfo.audioFileName}</div>
             <div><strong>Audio Track Actions:</strong> {debugInfo.audioTrackActions}</div>
             <div><strong>Insert Videos:</strong> {debugInfo.hasInsertVideos}</div>
-            <div><strong>Split Screen:</strong> {debugInfo.splitScreenEnabled ? 'Yes' : 'No'}</div>
           </div>
         </details>
       )}
@@ -782,10 +811,12 @@ function UnifiedPipelineForm({
             >
               📥 Download Video
             </button>
-          </div>
+          </div> 
         </div>
+        
       )}
     </div>
+    
   );
 }
 

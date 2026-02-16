@@ -39,17 +39,7 @@ const VideoOverlayKonva = ({
         setImages(prev => ({ ...prev, [overlay.id]: img }));
       };
     });
-  }, [imageOverlays, images]);
-
-  // ✅ DEBUG: Log current state
-  console.log('📊 VideoOverlayKonva State:', {
-    currentTime,
-    videoDuration,
-    textActions: tracks.filter(t => t.type === "text").flatMap(t => t.actions || []),
-    imageOverlays,
-    containerWidth,
-    containerHeight
-  });
+  }, [imageOverlays, images]); 
 
   return (
     <Stage

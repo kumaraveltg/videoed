@@ -64,10 +64,8 @@
     const [selectedImageOverlay, setSelectedImageOverlay] = useState(null);
     const [isProcessingImages, setIsProcessingImages] = useState(false); 
     const [mainVideo, setMainVideo] = useState(null);
-     
-    
-
-
+     const [timelineKey, setTimelineKey] = useState(0);
+  
     // Refs
     const audioInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -393,38 +391,7 @@ const calculateRenderedDimensions = (videoElement) => {
       );
     };
 
-    // useEffect(() => {
-    //   let repaired = false;
-    //   const newTracks = tracks.map((track) => {
-    //     const newActions = track.actions.map((a) => {
-    //       const start = Number.isFinite(Number(a.start)) ? Number(a.start) : 0;
-    //       let end = Number.isFinite(Number(a.end)) ? Number(a.end) : NaN;
-    //       if (!Number.isFinite(end) || end < start) {
-    //         end = start + 3;
-    //       }
-    //       const fontSize = Number.isFinite(Number(a.fontSize))
-    //         ? Number(a.fontSize)
-    //         : 24;
-    //       const x = Number.isFinite(Number(a.x)) ? Number(a.x) : 0;
-    //       const y = Number.isFinite(Number(a.y)) ? Number(a.y) : 50;
-
-    //       if (
-    //         start !== a.start ||
-    //         end !== a.end ||
-    //         fontSize !== a.fontSize ||
-    //         x !== a.x ||
-    //         y !== a.y
-    //       ) {
-    //         repaired = true;
-    //         return { ...a, start, end, fontSize, x, y };
-    //       }
-    //       return a;
-    //     });
-    //     return { ...track, actions: newActions };
-    //   });
-
-    //   if (repaired) setTracks(newTracks);
-    // }, [tracks]);
+     
 
     const handleTimelineChange = useCallback(
       (trackId, actionId, newStart, newY = null) => {
@@ -597,7 +564,7 @@ useEffect(() => {
 
       if (result.status === 'fulfilled' && result.value.success) {
         successfulFrames.set(frameIndex, result.value.objectUrl);
-        console.log(`[Frame ${frameIndex}] ✅ Loaded`);
+        //console.log(`[Frame ${frameIndex}] ✅ Loaded`);
       } else {
         failedFramesSet.add(frameIndex);
         console.log(`[Frame ${frameIndex}] ❌ Failed`);
@@ -2247,6 +2214,80 @@ const handleUnifiedProcessComplete = (result) => {
   }
 };
 
+const handleClearTimeline = () => {
+  console.log('🧹 Clearing timeline...');
+  
+  // Clear all states
+  setCuts([]);
+  setVideoOverlays([]);
+  setImageOverlays([]);
+  setInsertVideos([]);
+  setSelectedAction(null);
+  setSelectedVideoOverlay(null);
+  setSelectedImageOverlay(null);
+  setRazorMode(false);
+  
+  // Clear audio
+  if (addedAudioSrc && addedAudioSrc.startsWith('blob:')) {
+    URL.revokeObjectURL(addedAudioSrc);
+  }
+  setAddedAudioSrc(null);
+  setAudioMode('keep');
+  addedAudioFileRef.current = null;
+  audioEngineRef.current = null;
+  
+  setTracks(prev => prev.map(track => {
+    // Keep video track completely untouched (with frames)
+    if (track.type === 'video' || track.id === 'video-main') {
+      console.log('✅ Preserving video track with frames:', track);
+      return track;  // Don't modify video track at all
+    }
+    // Clear all other tracks
+    console.log('🧹 Clearing track:', track.id);
+    return { ...track, actions: [] };
+  }));
+
+  // Reset tracks
+  setTracks(prev =>
+  prev.map(track => {
+    if (track.type === 'video') {
+      return {
+        ...track,
+        actions: [],
+        useVirtualFrames: false,
+        src: null,
+        duration: 0
+      };
+    }
+    // ✅ IMPORTANT: keep non-video tracks valid
+    return {
+      ...track,
+      actions: []
+    };
+  })
+);
+  
+  // Unmute video
+  if (videoRef.current) {
+    videoRef.current.muted = false;
+    videoRef.current.currentTime = 0;
+  }
+  // ✅ Reset visible range to start
+  setVisibleRange({ start: 0, end: 30 });
+  setCurrentTime(0);
+  
+  // ✅ Clear frame cache to force reload
+  setFrameCache(new Map());
+  setLoadingFrames(new Set());
+  setFailedFrames(new Set());
+  
+  // ✅ Reset current time
+  setCurrentTime(0);
+  // ✅ Force complete re-render by incrementing key
+  setTimelineKey(prev => prev + 1);
+  
+  console.log('✅ Timeline cleared');
+};
 
     // ------------------- RENDER -------------------
     return (
@@ -2444,6 +2485,7 @@ const handleUnifiedProcessComplete = (result) => {
 
       <div className="timeline-scroll-content">
           <TimelineKonva
+            key={timelineKey}
             tracks={tracks}
             visibleRange={visibleRange}
             videoDuration={videoDuration}
@@ -2485,100 +2527,12 @@ const handleUnifiedProcessComplete = (result) => {
             failedFrames={failedFrames}
           />
         </div>
-     </div>
-
-      {/* ✅ Debug panel to verify dimensions */}
-      <div style={{
-        margin: "10px auto",
-        padding: 10,
-        background: "#1f2937",
-        borderRadius: 4,
-        maxWidth: renderedVideoWidth||640,
-        fontSize: 11,
-        color: "#9ca3af",
-        fontFamily: "monospace"
-      }}>
-        <strong style={{ color: "#60a5fa" }}>📐 Dimension Debug:</strong>
-        <div>Original Video: {videoWidthPx}x{videoHeightPx}px</div>
-        <div>Rendered Video: {renderedVideoWidth}x{renderedVideoHeight}px</div>
-        <div>Timeline Width: {timelineWidth}px ({videoDuration.toFixed(2)}s × {PIXELS_PER_SECOND}px/s)</div>
-        <div>Container Width: {videoContainerRef.current?.clientWidth || 0}px</div>
-      </div>
-
-  {/* ✅ ADD THIS NEW SECTION RIGHT AFTER THE AUDIO MODE INDICATOR */}
-  <div
-  style={{
-    padding: 20,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  }}
->
-    <button
-      onClick={handleExportAudioMode}
-      disabled={isProcessingAudio || !serverFilename}
-      style={{
-        padding: "12px 24px",
-        fontSize: 16,
-        fontWeight: "bold",
-        background: isProcessingAudio
-          ? "#6b7280"
-          : audioMode === AUDIO_MODES.MUTE
-          ? "#ef4444"
-          : audioMode === AUDIO_MODES.KEEP
-          ? "#3b82f6"
-          : audioMode === AUDIO_MODES.REPLACE
-          ? "#f59e0b"
-          : "#10b981",
-        color: "white",
-        border: "none",
-        borderRadius: 8,
-        cursor: isProcessingAudio || !serverFilename ? "not-allowed" : "pointer",
-        opacity: isProcessingAudio || !serverFilename ? 0.6 : 1,
-        transition: "all 0.2s",
-      }}
-    >
-      {isProcessingAudio ? (
-        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Loader /> Processing Audio...
-        </span>
-      ) : (
-        `🎬 Export Video with ${audioMode.toUpperCase()} Audio`
-      )}
-    </button>
+     </div> 
+  
+  
+     
     
-    <div style={{ marginTop: 10 }}>
-      {!serverFilename && (
-        <p style={{ color: "#f59e0b", fontSize: 14, margin: 0 }}>
-          ⚠️ Upload a video first to enable audio export
-        </p>
-      )}
-      
-      {serverFilename && !addedAudioSrc && (audioMode === AUDIO_MODES.REPLACE || audioMode === AUDIO_MODES.MIX) && (
-        <p style={{ color: "#f59e0b", fontSize: 14, margin: 0 }}>
-          ⚠️ Add an audio file for {audioMode.toUpperCase()} mode
-        </p>
-      )}
-      
-      {serverFilename && addedAudioSrc && (audioMode === AUDIO_MODES.REPLACE || audioMode === AUDIO_MODES.MIX) && (
-        <p style={{ color: "#34d399", fontSize: 14, margin: 0 }}>
-          ✅ Ready to export with {audioMode.toUpperCase()} audio
-        </p>
-      )}
-      
-      {serverFilename && audioMode === AUDIO_MODES.MUTE && (
-        <p style={{ color: "#9ca3af", fontSize: 14, margin: 0 }}>
-          ℹ️ Video will be exported without audio
-        </p>
-      )}
-      
-      {serverFilename && audioMode === AUDIO_MODES.KEEP && (
-        <p style={{ color: "#60a5fa", fontSize: 14, margin: 0 }}>
-          ℹ️ Video will keep its original audio
-        </p>
-      )}
-    </div>
-  </div>
+    
      
       {selectedAction && selectedAction.type === "text" && (
   <div style={{ marginTop: 10, padding: 10, background: "#2a2a2a", borderRadius: 4 }}>
@@ -2639,13 +2593,7 @@ const handleUnifiedProcessComplete = (result) => {
     </div>
   </div>
 )}
-
-
-        <button onClick={handleAddTextOverlay} style={{ marginTop: 10 }}>
-          Add Text Overlays to Video
-        </button>
-        
-
+ 
         {clips.length > 0 && (
           <div style={{ marginTop: 20 }}>
             <strong>Total Trim Parts: {clips.length}</strong>
@@ -2660,7 +2608,49 @@ const handleUnifiedProcessComplete = (result) => {
           </div>
         )}
 
-      
+  <div style={{ padding: 20 }}>
+           {/* ... all your existing UI components ... */}
+           
+           {/* ==================== UNIFIED PIPELINE SECTION ==================== */}
+           {/* Place this AFTER all the individual export buttons but BEFORE MergePanel */}
+           
+           <hr style={{ margin: '40px 0', border: 'none', borderTop: '2px solid #374151' }} />
+           
+           <UnifiedPipelineForm
+             // Main video
+             mainVideo={mainVideo}
+             setMainVideo={setMainVideo}
+             setFile={setFile}  // ✅ Add this
+              setMainVideoSource={setMainVideoSource}  // ✅ Add this
+              setBlobUrl={setBlobUrl}  // ✅ Add this
+              setVideoSrc={setVideoSrc}
+              onClearTimeline={handleClearTimeline}          
+             // Timeline data
+             clips={clips}
+             tracks={tracks}
+             
+             // Audio data
+             audioMode={audioMode}
+             addedAudioFile={addedAudioFileRef.current}
+             
+             // Overlays
+             videoOverlays={videoOverlays}
+             imageOverlays={imageOverlays}
+             
+             // Insert videos
+             insertVideos={insertVideos}
+             
+             // Split screen
+             splitScreenConfig={splitScreenConfig}
+             
+             // Callback
+             onProcessComplete={handleUnifiedProcessComplete}
+           />
+           
+           <hr style={{ margin: '40px 0', border: 'none', borderTop: '2px solid #374151' }} />
+           
+           {/* ... rest of your code (MergePanel, etc.) ... */}
+         </div>     
 
   {/* ==================== SPLIT-SCREEN SECTION ==================== */}
           {splitScreenConfig.enabled && (
@@ -2921,7 +2911,7 @@ const handleUnifiedProcessComplete = (result) => {
               ))}
             </div>
 
-            <button
+            {/* <button
               onClick={handleExportVideoOverlays}
               disabled={isProcessing || !serverFilename}
               style={{
@@ -2949,7 +2939,7 @@ const handleUnifiedProcessComplete = (result) => {
               ) : (
                 "🎬 Export Video with Overlays"
               )}
-            </button>
+            </button> */}
 
             {!serverFilename && (
               <p style={{ color: "#f59e0b", fontSize: 14, marginTop: 10 }}>
@@ -3017,7 +3007,7 @@ const handleUnifiedProcessComplete = (result) => {
         fontWeight: "bold"
       }}
     >
-      ➕ Add Insert Video
+      ➕ Insert Clips
     </button>
     {failedFrames.size > 0 && (
   <button
@@ -3122,7 +3112,7 @@ const handleUnifiedProcessComplete = (result) => {
           )}
 
           {/* Export Button */}
-          <button
+          {/* <button
             onClick={handleExportWithInserts}
             disabled={isProcessingInsert || !serverFilename || insertVideos.length === 0}
             style={{
@@ -3156,7 +3146,7 @@ const handleUnifiedProcessComplete = (result) => {
             ) : (
               "🎬 Export Video with Inserts"
             )}
-          </button>
+          </button> */}
 
           {/* Status Messages */}
           <div style={{ marginTop: 15 }}>
@@ -3194,119 +3184,14 @@ const handleUnifiedProcessComplete = (result) => {
                 e.target.value = "";
               }}
             />
-          <div style={{ 
-            marginTop: 30, 
-            padding: 20, 
-            background: "#2a2a2a", 
-            borderRadius: 8,
-            border: "2px solid #f59e0b"
-          }}> 
-            {/* Export Button */}
-            <button
-              onClick={handleExportImageOverlays}
-              disabled={isProcessingImages || !serverFilename || imageOverlays.length === 0}
-              style={{
-                padding: "14px 28px",
-                fontSize: 16,
-                fontWeight: "bold",
-                background: isProcessingImages || !serverFilename || imageOverlays.length === 0
-                  ? "#6b7280"
-                  : "#f59e0b",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                cursor: isProcessingImages || !serverFilename || imageOverlays.length === 0
-                  ? "not-allowed"
-                  : "pointer",
-                opacity: isProcessingImages || !serverFilename || imageOverlays.length === 0
-                  ? 0.6
-                  : 1,
-                transition: "all 0.2s",
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10
-              }}
-            >
-              {isProcessingImages ? (
-                <>
-                  <Loader /> Processing Image Overlays...
-                </>
-              ) : (
-                "🎬 Export Video with Image Overlays"
-              )}
-            </button>  
           
-       </div>    
+            
       <hr />
-       <div style={{ padding: 20 }}>
-           {/* ... all your existing UI components ... */}
-           
-           {/* ==================== UNIFIED PIPELINE SECTION ==================== */}
-           {/* Place this AFTER all the individual export buttons but BEFORE MergePanel */}
-           
-           <hr style={{ margin: '40px 0', border: 'none', borderTop: '2px solid #374151' }} />
-           
-           <UnifiedPipelineForm
-             // Main video
-             mainVideo={mainVideo}
-             
-             // Timeline data
-             clips={clips}
-             tracks={tracks}
-             
-             // Audio data
-             audioMode={audioMode}
-             addedAudioFile={addedAudioFileRef.current}
-             
-             // Overlays
-             videoOverlays={videoOverlays}
-             imageOverlays={imageOverlays}
-             
-             // Insert videos
-             insertVideos={insertVideos}
-             
-             // Split screen
-             splitScreenConfig={splitScreenConfig}
-             
-             // Callback
-             onProcessComplete={handleUnifiedProcessComplete}
-           />
-           
-           <hr style={{ margin: '40px 0', border: 'none', borderTop: '2px solid #374151' }} />
-           
-           {/* ... rest of your code (MergePanel, etc.) ... */}
-         </div> 
+       
 
-       <button
-  onClick={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Direct approach - bypass handleAddVideoRequest
-    if (!videoInputRef.current) {
-      alert('File picker not initialized');
-      return;
-    }
-    
-    videoInputRef.current.click();
-  }}
-  style={{
-    padding: '14px 28px',
-    background: '#3b82f6',
-    color: 'white',
-    border: 'none',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: 16,
-    fontWeight: 'bold'
-  }}
->
-  📹 Upload Video
-</button>  
-      <h3>🧩 Merge Videos</h3>
-      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
+      
+      {/* <h3>🧩 Merge Videos</h3>
+      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} />  */}
       
     </div>  
   );

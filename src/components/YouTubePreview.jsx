@@ -32,10 +32,10 @@ function YouTubePreview() {
           }, 100); // switch ReactPlayer to server video
                 }
 
-      alert("YouTube video downloaded to server!");
+      alert("video downloaded to server!");
     } catch (err) {
       console.error(err);
-      alert("Failed to download YouTube video");
+      alert("Failed to download   video");
     }
   };
 
@@ -43,7 +43,7 @@ function YouTubePreview() {
     <div style={{ margin: "20px" }}>
       <input
         type="text"
-        placeholder="Paste YouTube URL"
+        placeholder="Paste URL"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         style={{ width: "400px", marginRight: "10px" }}
