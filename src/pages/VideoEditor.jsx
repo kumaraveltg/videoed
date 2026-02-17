@@ -11,6 +11,7 @@
   import UnifiedPipelineForm from "../components/UnifiedPipelineForm";
   import { debugLog, debugGroup, debugGroupEnd } from "../utils/debuggerLog";
   import {useVirtualFrames} from "../hooks/useVirtualFrames";
+  import  config from "../config";
 
 
   function VideoEditor() {
@@ -199,7 +200,7 @@ const calculateRenderedDimensions = (videoElement) => {
       const formData = new FormData();
       formData.append("file", file);
 
-      fetch("http://localhost:8000/upload/local", {
+      fetch(`${config.API_URL}/upload/local`, {
         method: "POST",
         body: formData,
       })
@@ -232,7 +233,7 @@ const calculateRenderedDimensions = (videoElement) => {
     // ------------------- LOAD MERGE VIDEOS -------------------
     const loadVideosForMerge = async () => {
       try {
-        const res = await fetch("http://localhost:8000/video/list");
+        const res = await fetch(`${config.API_URL}/video/list`);
         const data = await res.json();
         setMergedVideos(data.videos || []);
       } catch (err) {
@@ -305,7 +306,7 @@ const calculateRenderedDimensions = (videoElement) => {
         console.log("payloas,",payloadCuts);
       try {
         setIsProcessing(true);
-        const res = await fetch("http://localhost:8000/video/trim", {
+        const res = await fetch(`${config.API_URL}/video/trim`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ filename: serverFilename, cuts: payloadCuts }),
@@ -464,7 +465,7 @@ const calculateRenderedDimensions = (videoElement) => {
       const payload = { filename: serverFilename, overlays };
 
       try {
-        const res = await fetch("http://localhost:8000/video/add-text", {
+        const res = await fetch(`${config.API_URL}/video/add-text`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -535,7 +536,7 @@ useEffect(() => {
     const results = await Promise.allSettled(
       batch.map(async (frameIndex) => {
         try {
-          const url = `http://localhost:8000/video/frame/${serverFilename}/${frameIndex}`;
+          const url = `${config.API_URL}/video/frame/${serverFilename}/${frameIndex}`;
           const response = await fetch(url);
           
           if (!response.ok) {
@@ -629,7 +630,7 @@ const handleOnVideoUpload = async (file) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:8000/upload/local", {
+    const res = await fetch(`${config.API_URL}/upload/local`, {
       method: "POST",
       body: formData,
     });
@@ -1118,7 +1119,7 @@ const handleOnVideoUpload = async (file) => {
         fd.append("file", addedAudioFileRef.current);
 
         const uploadRes = await fetch(
-          "http://localhost:8000/upload/local",
+          `${config.API_URL}/upload/local`,
           {
             method: "POST",
             body: fd,
@@ -1141,7 +1142,7 @@ const handleOnVideoUpload = async (file) => {
       };
 
       const response = await fetch(
-        "http://localhost:8000/video/audio-control",
+        `${config.API_URL}/video/audio-control`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1282,7 +1283,7 @@ const handleOnVideoUpload = async (file) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:8000/upload/local", {
+    const res = await fetch(`${config.API_URL}/upload/local`, {
       method: "POST",
       body: formData,
     });
@@ -1405,7 +1406,7 @@ const handleOnVideoUpload = async (file) => {
 
       console.log("📤 Sending split-screen request:", payload);
 
-      const response = await fetch("http://localhost:8000/video/split-screen", {
+      const response = await fetch(`${config.API_URL}/video/split-screen`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1484,7 +1485,7 @@ const handleOnVideoUpload = async (file) => {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("http://localhost:8000/upload/local", {
+      const res = await fetch(`${config.API_URL}/upload/local`, {
         method: "POST",
         body: formData,
       });
@@ -1552,7 +1553,7 @@ const handleAddVideoOverlay = async (file, startTime = 0) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:8000/upload/local", {
+    const res = await fetch(`${config.API_URL}/upload/local`, {
       method: "POST",
       body: formData,
     });
@@ -1752,7 +1753,7 @@ const handleExportVideoOverlays = async () => {
       inserts_count: inserts.length
     });
 
-    const response = await fetch("http://localhost:8000/video/add-multiple-inserts", {
+    const response = await fetch(`${config.API_URL}/video/add-multiple-inserts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1802,7 +1803,7 @@ const handleAddInsertVideo = async (file, position) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:8000/upload/local", {
+    const res = await fetch(`${config.API_URL}/upload/local`, {
       method: "POST",
       body: formData,
     });
@@ -1871,7 +1872,7 @@ const handleExportWithInserts = async () => {
 
         console.log("📤 Sending insert request:", payload);
 
-        const response = await fetch("http://localhost:8000/video/insert-at-position", {
+        const response = await fetch(`${config.API_URL}/video/insert-at-position`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -1948,7 +1949,7 @@ const handleAddImageOverlay = async (file, startTime = 0) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("http://localhost:8000/upload/local", {
+    const res = await fetch(`${config.API_URL}/upload/local`, {
       method: "POST",
       body: formData,
     });
@@ -2144,7 +2145,7 @@ const handleExportImageOverlays = async () => {
       overlays_count: overlays.length
     });
 
-    const response = await fetch("http://localhost:8000/video/add-image-overlays", {
+    const response = await fetch(`${config.API_URL}/video/add-image-overlays`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

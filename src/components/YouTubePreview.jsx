@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ReactPlayer from "react-player";
+import config from "../config"
 
 function YouTubePreview() {
   const [url, setUrl] = useState("");               // input YouTube URL
@@ -12,7 +13,7 @@ function YouTubePreview() {
       const formData = new FormData();
       formData.append("url", url);
 
-      const res = await fetch("http://localhost:8000/upload/youtube", {
+      const res = await fetch(`${config.API_URL}/upload/youtube`, {
         method: "POST",
         body: formData,
       });

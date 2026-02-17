@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import config from "../config"
 
 function UnifiedPipelineForm({ 
   mainVideo,
@@ -67,7 +68,7 @@ function UnifiedPipelineForm({
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await fetch('http://localhost:8000/upload/local', { // ✅ CHANGED: Use /upload/local
+    const response = await fetch(`${config.API_URL}/upload/local`, { // ✅ CHANGED: Use /upload/local
       method: 'POST',
       body: formData
     });
@@ -437,7 +438,7 @@ function UnifiedPipelineForm({
       const formData = new FormData();
       formData.append('file', addedAudioFile);
       
-      const audioResponse = await fetch('http://localhost:8000/upload/local', {
+      const audioResponse = await fetch(`${config.API_URL}/upload/local`, {
         method: 'POST',
         body: formData
       });
@@ -466,7 +467,7 @@ function UnifiedPipelineForm({
     console.log('🔍 Payload.tasks:', payload.tasks);
     console.log('🔍 Number of tasks in payload:', Object.keys(payload.tasks || {}).length);
 
-    const response = await fetch('http://localhost:8000/video/unified-pipeline', {
+    const response = await fetch(`${config.API_URL}/video/unified-pipeline`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -519,7 +520,7 @@ function UnifiedPipelineForm({
     
     // Download the video
     const downloadResponse = await fetch(
-      `http://localhost:8000/video/download/${result.output}`
+      `${config.API_URL}/video/download/${result.output}`
     );
     
     if (!downloadResponse.ok) {
@@ -564,7 +565,7 @@ function UnifiedPipelineForm({
     
     
     // Cleanup - delete file from uploads
-    const cleanupResponse = await fetch('http://localhost:8000/video/cleanup', {
+    const cleanupResponse = await fetch(`${config.API_URL}/video/cleanup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
