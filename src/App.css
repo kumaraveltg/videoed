@@ -90,6 +90,7 @@
   object-fit: contain; /* ✅ Maintains aspect ratio */
   display: block;
   z-index: 1;
+  object-fit: cover;
 }
 
 /* ✅ NEW: Centered editor layout */

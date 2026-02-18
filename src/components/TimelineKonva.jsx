@@ -8,7 +8,7 @@ const TimelineKonva = ({
   tracks = [],
   videoDuration = 0,
   currentTime = 0,
-  scrollLeft = 0,
+  scrollLeft = 0, 
   onTimeChange,
   onAddAction,
   onDeleteAction,
@@ -28,7 +28,7 @@ const TimelineKonva = ({
   const PIXELS_PER_SECOND = 10;
   const FRAME_WIDTH = PIXELS_PER_SECOND;
   const trackHeight = 50;
-  const timelineWidth = timelinePxWidth || videoDuration * PIXELS_PER_SECOND;
+  const timelineWidth = Math.max(timelinePxWidth || videoDuration * PIXELS_PER_SECOND, 640);
 
   const timeToX = (t) => t * PIXELS_PER_SECOND;
   const xToTime = (x) => {
@@ -194,7 +194,7 @@ Frame.displayName = 'Frame';
     const pos = stage.getPointerPosition();
     if (!pos) return;
 
-    const newTime = xToTime(pos.x);
+    const newTime = xToTime(pos.x+scrollLeft);
     
     if (onTimeChange) {
       onTimeChange(newTime);
@@ -333,7 +333,7 @@ Frame.displayName = 'Frame';
     }
   };
   
-
+//console.log("📏 timelineWidth:", timelineWidth, "currentTime:", currentTime, "x:", timeToX(currentTime) - scrollLeft);
  return (
   <div style={{ background: "#222", position: "relative" }}>
     <button 
@@ -477,13 +477,14 @@ Frame.displayName = 'Frame';
 
       {/* Konva Stage */}
       <div style={{ minWidth: 0, flex: 1, position: 'relative' }}>
-        <Stage
+        <Stage 
           ref={stageRef}
           width={timelineWidth}
           height={tracks.length * trackHeight + 30}
           style={{ 
             display: 'block',
-            background: '#1a1a1a'
+            background: '#1a1a1a',
+            pointerEvents:"auto"
           }}
           onMouseDown={(e) => {
             console.log("🎯🎯🎯 STAGE CLICKED - razorMode:", razorMode, "button:", e.evt.button);
@@ -518,7 +519,7 @@ Frame.displayName = 'Frame';
             
             console.log("🎬 Normal scrub mode");
             handleScrub(e);
-          }}
+          }} 
           onMouseMove={(e) => {
             if (e.evt.buttons === 1 && !razorMode) {
               handleScrub(e);
@@ -529,10 +530,11 @@ Frame.displayName = 'Frame';
           {/* Current time indicator */}
           <Layer>
             <Line
+             key={`playhead-${currentTime}`} 
               points={[
-                timeToX(currentTime),
+                timeToX(currentTime) -scrollLeft,
                 0,
-                timeToX(currentTime),
+                timeToX(currentTime) -scrollLeft,
                 tracks.length * trackHeight + 30,
               ]}
               stroke="#ff4444"

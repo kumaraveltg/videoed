@@ -490,9 +490,16 @@ const calculateRenderedDimensions = (videoElement) => {
 
           // In your main component (App.jsx or wherever you manage state)
 
-const [frameCache, setFrameCache] = useState(new Map());
+const frameCacheRef = useRef(new Map());
+const [frameCacheVersion, setFrameCacheVersion] = useState(0);
 const [loadingFrames, setLoadingFrames] = useState(new Set());
 const [failedFrames, setFailedFrames] = useState(new Set());
+
+useEffect(() => {
+  return () => {
+    frameCacheRef.current.forEach(url => URL.revokeObjectURL(url));
+  };
+}, []);
 
 // Load frames for visible range
 useEffect(() => {
@@ -506,7 +513,7 @@ useEffect(() => {
   // Find frames that need loading
   const framesToLoad = [];
   for (let i = start; i <= end; i++) {
-    const isLoaded = frameCache.has(i);
+    const isLoaded = frameCacheRef.current.has(i);
     const isLoading = loadingFrames.has(i);
     const hasFailed = failedFrames.has(i);
     
@@ -574,11 +581,10 @@ useEffect(() => {
 
     // ✅ Batch update: Only 3 state updates instead of N*3
     if (successfulFrames.size > 0) {
-      setFrameCache(prev => {
-        const next = new Map(prev);
-        successfulFrames.forEach((url, idx) => next.set(idx, url));
-        return next;
+      successfulFrames.forEach((url, idx) => {
+        frameCacheRef.current.set(idx, url);  // ✅ Mutate ref directly
       });
+      setFrameCacheVersion(v => v + 1);  // ✅ Trigger one re-render
     }
 
     setLoadingFrames(prev => {
@@ -607,14 +613,11 @@ useEffect(() => {
 
 }, [visibleRange, serverFilename,]); // frameCache, loadingFrames, failedFrames
 // ✅ Cleanup: Revoke object URLs when frames are removed from cache
-useEffect(() => {
-  return () => {
-    frameCache.forEach(url => URL.revokeObjectURL(url));
-  };
-}, [ ]);
+
 
 const retryFailedFrames = () => {
   console.log(`[Retry] Clearing ${failedFrames.size} failed frames`);
+  frameCacheRef.current.clear();
   setFailedFrames(new Set());
 };
   
@@ -768,12 +771,13 @@ const handleOnVideoUpload = async (file) => {
       if (!video) return;
 
       const onTimeUpdate = () => {
+        console.log("⏱️ timeupdate:", video.currentTime);
         setCurrentTime(video.currentTime);
       };
 
       video.addEventListener("timeupdate", onTimeUpdate);
       return () => video.removeEventListener("timeupdate", onTimeUpdate);
-    }, []);
+    }, [videoRef.current]);
 
     
 
@@ -2303,7 +2307,7 @@ const handleClearTimeline = () => {
   style={{
     position: "relative",
     width: 640,
-    height: splitMode ? "auto" : 360,
+    height: splitMode ? "auto" : 400,
     marginTop: 10,
     marginLeft: "auto",
     marginRight: "auto",
@@ -2333,17 +2337,17 @@ const handleClearTimeline = () => {
       <Loader />
     </div>
   )}
-
+ 
   {!splitMode && (
     (mainVideoSource || videoSrc) ? (
-      <div className="editor-root" style={{ position: "relative", width: 640, height: 360 }}>    
+      <div className="editor-root" style={{ position: "relative", width: 640, height: 400 }}>    
         <div className="video-area" style={{ position: "relative", width: "100%", height: "100%" }}> 
           <VideoPlayer
             ref={videoRef}
             src={mainVideoSource || videoSrc}
             muted={false}
             width={640}
-            height={360}
+            height={400}
             controls
             preload="auto" 
             style={{
@@ -2363,7 +2367,7 @@ const handleClearTimeline = () => {
               calculateRenderedDimensions(e.target);
             }}
           /> 
-
+         
           {/* ✅ OVERLAY INSIDE video-area */}
           {renderedVideoWidth > 0 && renderedVideoHeight > 0 && (
             <div
@@ -2373,17 +2377,19 @@ const handleClearTimeline = () => {
                 left: "50%",
                 transform: "translate(-50%, -50%)",
                 width: renderedVideoWidth,
-                height: renderedVideoHeight,
-                pointerEvents: "auto",
+                height: renderedVideoHeight-45,
+                pointerEvents: "none", // auto
                 zIndex: 100,
               }}
+              onClick={() => console.log("🚨 OVERLAY DIV CLICKED")}  // ← add this
             >
               <div style={{ position: "relative", width: "100%", height: "100%", pointerEvents: "auto"  }}
-               onMouseDown={(e) => e.stopPropagation()}
+               //onMouseDown={(e) => e.stopPropagation()}
               >
                 <VideoOverlayKonva
+                 // style={{ pointerEvents: "auto" }}
                   videoWidth={renderedVideoWidth}
-                  videoHeight={renderedVideoHeight}
+                  videoHeight={renderedVideoHeight-45}
                   containerWidth={640}
                   containerHeight={360}
                   videoDuration={duration}
@@ -2493,9 +2499,18 @@ const handleClearTimeline = () => {
             timelinePxWidth={timelineWidth}
             width={640}
             videoRef={videoRef}
-            currentTime={currentTime}
+            currentTime={currentTime} 
             scrollLeft={timelineScrollLeft} // ✅ Pass scroll position
-            onTimeChange={setCurrentTime}
+            onTimeChange={(time) => {
+              setCurrentTime(time);
+              if (videoRef.current) {
+                const wasPlaying = !videoRef.current.paused;
+                videoRef.current.currentTime = time;
+                if (wasPlaying) {
+                  videoRef.current.play().catch(() => {});
+                }
+              }
+            }}
             onChange={handleTimelineChange}
             onAddAction={handleAddAction}
             onSelectAction={setSelectedAction}
@@ -2523,14 +2538,20 @@ const handleClearTimeline = () => {
             handleAddInsertVideo={handleAddInsertVideo}
             onAddImageRequest={handleAddImageRequest} 
             onDeleteImageOverlay={handleDeleteImageOverlay}  
-            frameCache={frameCache}
+            frameCache={frameCacheRef.current}
             loadingFrames={loadingFrames}
             failedFrames={failedFrames}
           />
         </div>
      </div> 
   
-  
+  <button onClick={() => {
+            console.log("videoRef.current:", videoRef.current);
+            console.log("is video element?:", videoRef.current instanceof HTMLVideoElement);
+            console.log("paused?:", videoRef.current?.paused);
+          }}>
+            Debug Ref
+          </button>
      
     
     
