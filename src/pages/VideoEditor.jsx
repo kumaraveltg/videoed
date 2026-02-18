@@ -65,7 +65,8 @@
     const [selectedImageOverlay, setSelectedImageOverlay] = useState(null);
     const [isProcessingImages, setIsProcessingImages] = useState(false); 
     const [mainVideo, setMainVideo] = useState(null);
-     const [timelineKey, setTimelineKey] = useState(0);
+    const [timelineKey, setTimelineKey] = useState(0);
+    const [pendingCut, setPendingCut] = useState(null);
   
     // Refs
     const audioInputRef = useRef(null);
@@ -248,28 +249,31 @@ const calculateRenderedDimensions = (videoElement) => {
     // ------------------- EXPORT TRIM -------------------
   
 
-  const handleSplit = (time) => {
+ 
 
-    const roundedTime = Number(time.toFixed(2));
+const handleSplit = (time) => {
+  const roundedTime = Number(time.toFixed(2));
 
-    console.log("✂️ split at", roundedTime);
+  if (pendingCut === null) {
+    setPendingCut(roundedTime);  // ✅ First click
+    console.log("✂️ First cut at:", roundedTime);
+  } else {
+    const start = Math.min(pendingCut, roundedTime);
+    const end = Math.max(pendingCut, roundedTime);
+    setCuts(prev => [...prev, start, end].sort((a, b) => a - b));
+    setPendingCut(null);  // ✅ Reset after second click
+    console.log("✂️ Trim range:", start, "→", end);
+  }
+};
 
-    setCuts(prev => {
-
-      // avoid duplicate cuts
-      if (prev.includes(roundedTime)) {
-        console.log("⚠️ cut already exists");
-        return prev;
-      }
-
-      const updated = [...prev, roundedTime].sort((a,b)=>a-b);
-
-      console.log("🪓 cuts:", updated);
-
-      return updated;
-    });
-
-  };
+  const handleDeleteClip = (clipId) => {
+  // Each clip uses index as id, remove both cuts for that clip
+  setCuts(prev => {
+    const updated = [...prev];
+    updated.splice(clipId * 2, 2);  // Remove start and end cut
+    return updated;
+  });
+};
 
   const clips = useMemo(() => {
 
@@ -277,8 +281,8 @@ const calculateRenderedDimensions = (videoElement) => {
 
     const result = [];
 
-    for (let i = 0; i < cuts.length - 1; i+=2) {
-
+    for (let i = 0; i < cuts.length - 1; i+=2)
+       { 
       result.push({
         id: i/2,
         start: cuts[i],
@@ -2282,7 +2286,7 @@ const handleClearTimeline = () => {
   setCurrentTime(0);
   
   // ✅ Clear frame cache to force reload
-  setFrameCache(new Map());
+  frameCacheRef.current = new Map();
   setLoadingFrames(new Set());
   setFailedFrames(new Set());
   
@@ -2476,7 +2480,71 @@ const handleClearTimeline = () => {
             e.target.value = "";
           }}
         />
- 
+      <div style={{
+  width: 640,
+  margin: "10px auto 0",
+  display: "flex",
+  gap: 2,
+  padding: "4px",
+  background: "#222",
+  border: "1px solid #555",
+  borderBottom: "none",
+  borderRadius: "4px 4px 0 0"
+}}>
+  <button
+    onClick={() => setRazorMode(v => !v)}
+    style={{
+      padding: '8px 16px',
+      background: razorMode ? '#ef4444' : '#3b82f6',
+      color: 'white',
+      border: 'none',
+      borderRadius: 4,
+      cursor: 'pointer',
+      fontWeight: 'bold',
+    }}
+  >
+    {razorMode ? "✂️ Razor Active (Click to Disable)" : "✂️ Enable Razor Tool"}
+  </button>
+
+  <input
+    type="file"
+    accept="video/*"
+    hidden
+    id="insert-video-input"
+    onChange={(e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const position = prompt(
+        `Insert at what position? (0 - ${videoDuration.toFixed(2)}s)\nCurrent time: ${currentTime.toFixed(2)}s`,
+        currentTime.toFixed(2)
+      );
+      if (position !== null) handleAddInsertVideo(file, parseFloat(position));
+      e.target.value = "";
+    }}
+  />
+
+  <button
+    onClick={() => document.getElementById('insert-video-input').click()}
+    disabled={!serverFilename}
+    style={{
+      padding: "8px 16px",
+      background: serverFilename ? "#10b981" : "#6b7280",
+      color: "white",
+      border: "none",
+      borderRadius: 6,
+      cursor: serverFilename ? "pointer" : "not-allowed",
+      fontWeight: "bold"
+    }}
+  >
+    ➕ Insert Videos
+  </button>
+
+  {razorMode && (
+    <span style={{ color: '#92400e', background: '#fef3c7', padding: '8px', borderRadius: 4, fontSize: 13 }}>
+      ⚠️ Click timeline to split
+    </span>
+  )}
+</div>
       <div 
         style={{
           width: 640, // ✅ Match video player width exactly
@@ -2541,21 +2609,11 @@ const handleClearTimeline = () => {
             frameCache={frameCacheRef.current}
             loadingFrames={loadingFrames}
             failedFrames={failedFrames}
+            pendingCut={pendingCut}
+            onDeleteClip={handleDeleteClip}
           />
         </div>
-     </div> 
-  
-  <button onClick={() => {
-            console.log("videoRef.current:", videoRef.current);
-            console.log("is video element?:", videoRef.current instanceof HTMLVideoElement);
-            console.log("paused?:", videoRef.current?.paused);
-          }}>
-            Debug Ref
-          </button>
-     
-    
-    
-     
+     </div>  
       {selectedAction && selectedAction.type === "text" && (
   <div style={{ marginTop: 10, padding: 10, background: "#2a2a2a", borderRadius: 4 }}>
     <h4 style={{ color: "#60a5fa", marginTop: 0 }}>Edit Text Overlay</h4>

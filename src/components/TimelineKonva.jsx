@@ -17,11 +17,11 @@ const TimelineKonva = ({
   timelinePxWidth,
   videoRef,
   visibleRange = { start: 0, end: 30 },
-  onAudioTrackAction,onSplit,clips = [],  razorMode,setRazorMode,
+  onAudioTrackAction,onSplit,clips = [],  razorMode, 
   onAddSecondVideoRequest,  
   onSecondVideoTrackAction,
   onAddVideoOverlay,        
-  onDeleteVideoOverlay, serverFilename,
+  onDeleteVideoOverlay,  pendingCut = null,onDeleteClip,
   handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest,frameCache,loadingFrames,failedFrames
 }) => {
   const stageRef = useRef();
@@ -333,78 +333,10 @@ Frame.displayName = 'Frame';
     }
   };
   
-//console.log("📏 timelineWidth:", timelineWidth, "currentTime:", currentTime, "x:", timeToX(currentTime) - scrollLeft);
+ 
  return (
-  <div style={{ background: "#222", position: "relative" }}>
-    <button 
-      onClick={() => {
-        console.log("🔘 Razor button clicked, current:", razorMode);
-        setRazorMode(v => !v);
-      }}
-      style={{
-        padding: '8px 16px',
-        background: razorMode ? '#ef4444' : '#3b82f6',
-        color: 'white',
-        border: 'none',
-        borderRadius: 4,
-        cursor: 'pointer',
-        fontWeight: 'bold',
-        marginBottom: 10
-      }}
-    >
-      {razorMode ? "✂️ Razor Active (Click to Disable)" : "✂️ Enable Razor Tool"}
-    </button> 
-    <input
-      type="file"
-      accept="video/*"
-      hidden
-      id="insert-video-input"
-      onChange={(e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        
-        const position = prompt(
-          `Insert at what position? (0 - ${videoDuration.toFixed(2)}s)\n` +
-          `Current time: ${currentTime.toFixed(2)}s`,
-          currentTime.toFixed(2)
-        );
-        
-        if (position !== null) {
-          handleAddInsertVideo(file, parseFloat(position));
-        }
-        
-        e.target.value = "";
-      }}
-    />
-     <button
-      onClick={() => document.getElementById('insert-video-input').click()}
-      disabled={!serverFilename}
-      style={{
-        padding: "8px 16px", 
-         background: serverFilename ? "#10b981" : "#6b7280",
-        color: "white",
-        border: "none",
-        borderRadius: 6,
-        cursor: serverFilename ? "pointer" : "not-allowed", 
-        fontWeight: "bold"
-      }}
-    >
-      ➕ Insert Videos
-    </button> 
-    
-    {razorMode && (
-      <div style={{ 
-        padding: 8, 
-        background: '#fef3c7', 
-        color: '#92400e',
-        borderRadius: 4,
-        marginBottom: 10,
-        fontSize: 13
-      }}>
-        ⚠️ Click on the timeline to split at that position
-      </div>
-    )}
-    
+    <div style={{ background: "#222", position: "relative" }}>   
+  
     {/* Timeline Ruler */}
     <TimelineRuler
       videoDuration={videoDuration}
@@ -527,26 +459,6 @@ Frame.displayName = 'Frame';
           }}
           onContextMenu={handleStageContextMenu}
         >
-          {/* Current time indicator */}
-          <Layer>
-            <Line
-             key={`playhead-${currentTime}`} 
-              points={[
-                timeToX(currentTime) -scrollLeft,
-                0,
-                timeToX(currentTime) -scrollLeft,
-                tracks.length * trackHeight + 30,
-              ]}
-              stroke="#ff4444"
-              strokeWidth={2}
-              listening={false}
-              shadowColor="#ff0000"
-              shadowBlur={8}
-              shadowOpacity={0.6}
-            />
-          </Layer> 
-
-          {/* TRACKS - Disable listening in razor mode */}
           <Layer listening={!razorMode}>
             {tracks.map((track, rowIndex) => {
               const trackY = rowIndex * trackHeight + 30;
@@ -670,52 +582,9 @@ Frame.displayName = 'Frame';
                               fill="#fff"
                               listening={false}
                             />
-                          )}
-                        {/* {track.type === "video" && allFrames.length > 0 && (
-                          <>
-                            {allFrames.map((frameSrc, frameIndex) => {
-                              const absoluteTime = frameIndex;
-                              
-                              if (absoluteTime < viewportStart || absoluteTime > viewportEnd) {
-                                return null;
-                              }
-                              
-                              const frameX = (absoluteTime - start) * FRAME_WIDTH;
-                              
-                              if (frameX < 0 || frameX >= actionW) {
-                                return null;
-                              }
-
-                              return (
-                                <Frame
-                                  key={`${action.id}-frame-${frameIndex}`}
-                                  src={frameSrc}
-                                  x={frameX}
-                                  y={0}
-                                  w={FRAME_WIDTH}
-                                  h={trackHeight - 10}
-                                  absoluteTime={absoluteTime}
-                                  frameIndex={frameIndex}
-                                  razorMode={razorMode}
-                                  onTimeChange={onTimeChange}
-                                  videoRef={videoRef}
-                                />
-                              );
-                            })}
-                          </> 
-                        )}  */}
+                          )} 
                         {track.type === "video" && action.useVirtualFrames && (
-                          <>
-                          {/* {console.log('[Timeline] Rendering frames:', {
-                            actionId: action.id,
-                            start: action.start,
-                            end: action.end,
-                            duration: action.end - action.start,
-                            frameCount: Math.ceil(action.end - action.start),
-                            cacheSize: frameCache?.size,
-                            visibleRange
-                          })} */}
-                          
+                          <> 
                       <Group>
                         {Array.from({ length: Math.ceil(duration) }, (_, i) => {
                           const frameIndex = Math.floor(start) + i;
@@ -750,40 +619,66 @@ Frame.displayName = 'Frame';
                   })}
                 </Group>
               );
-            })}
-            
-            {/* Clips visualization */}
+            })} 
+          </Layer>
+           
+          {/* ✅ CLIPS Layer  visualization */}
+          <Layer listening={true}>
             {clips.map(clip => {
               const videoTrackIndex = tracks.findIndex(t => t.type === "video");
               if (videoTrackIndex === -1) return null;
-              
               const trackY = videoTrackIndex * trackHeight + 30;
               
+              // ✅ Subtract scrollLeft like playhead does
+              const startX = clip.start * PIXELS_PER_SECOND - scrollLeft;
+              const endX = clip.end * PIXELS_PER_SECOND - scrollLeft;
+              const midX = (startX + endX) / 2;
+
               return (
                 <Group key={clip.id}>
-                  <Rect
-                    x={clip.start * PIXELS_PER_SECOND}
-                    y={trackY + 4}
-                    width={(clip.end - clip.start) * PIXELS_PER_SECOND}
-                    height={trackHeight - 10}
-                    fill="transparent"
-                    stroke="#00ff00"
-                    strokeWidth={2}
-                    dash={[5, 5]}
-                    listening={false}
-                  />
-                  <Line
-                    points={[
-                      clip.start * PIXELS_PER_SECOND, trackY,
-                      clip.start * PIXELS_PER_SECOND, trackY + trackHeight
-                    ]}
-                    stroke="#ff0000"
-                    strokeWidth={2}
-                    listening={false}
-                  />
+                  <Line points={[startX, 0, startX, tracks.length * trackHeight + 30]} stroke="#ff0000" strokeWidth={2} listening={false} />
+                  <Line points={[endX, 0, endX, tracks.length * trackHeight + 30]} stroke="#ff0000" strokeWidth={2} listening={false} />
+                  {/* Only show delete button if visible on screen */}
+                  {midX > 0 && midX < timelineWidth && (
+                    <>
+                      <Rect x={midX - 12} y={trackY + 6} width={24} height={18} fill="#ef4444" cornerRadius={3} onClick={() => onDeleteClip?.(clip.id)} />
+                      <Text x={midX - 5} y={trackY + 9} text="✕" fontSize={12} fill="#fff" onClick={() => onDeleteClip?.(clip.id)} />
+                    </>
+                  )}
                 </Group>
               );
             })}
+          </Layer> 
+          {/* Current time indicator */}
+          <Layer>
+            <Line
+             key={`playhead-${currentTime}`} 
+              points={[
+                timeToX(currentTime) -scrollLeft,
+                0,
+                timeToX(currentTime) -scrollLeft,
+                tracks.length * trackHeight + 30,
+              ]}
+              stroke="#ff4444"
+              strokeWidth={2}
+              listening={false}
+              shadowColor="#ff0000"
+              shadowBlur={8}
+              shadowOpacity={0.6}
+            />
+            {/* Pending cut line */}
+            {pendingCut !== null && (
+              <Line
+                points={[
+                  timeToX(pendingCut) - scrollLeft, 0,
+                  timeToX(pendingCut) - scrollLeft, tracks.length * trackHeight + 30
+                ]}
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dash={[5, 5]}
+                listening={false}
+              />
+            )}
           </Layer>
         </Stage>
       </div>         
@@ -895,7 +790,7 @@ Frame.displayName = 'Frame';
     )}
   </div>
 )}
-  </div>
+   </div> 
 );
 };
 
