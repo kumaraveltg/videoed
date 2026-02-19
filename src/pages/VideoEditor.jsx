@@ -2674,7 +2674,7 @@ const handleClearTimeline = () => {
   </div>
 )}
  
-        {clips.length > 0 && (
+        {/* {clips.length > 0 && (
           <div style={{ marginTop: 20 }}>
             <strong>Total Trim Parts: {clips.length}</strong>
             <br />
@@ -2686,7 +2686,10 @@ const handleClearTimeline = () => {
               {isProcessing ? <Loader /> : "Export Final Video"}
             </button>
           </div>
-        )}
+        )} */}
+
+         <h3>🧩 Merge Videos</h3>
+      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
 
   <div style={{ padding: 20 }}>
            {/* ... all your existing UI components ... */}
@@ -3266,13 +3269,7 @@ const handleClearTimeline = () => {
             />
           
             
-      <hr />
-       
-
-      
-      {/* <h3>🧩 Merge Videos</h3>
-      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} />  */}
-      
+      <hr /> 
     </div>  
   );
 }
