@@ -5,8 +5,7 @@ function UnifiedPipelineForm({
   mainVideo,
   clips,
   tracks,
-  audioMode,
-  addedAudioFile,
+  audioMode, 
   videoOverlays,
   imageOverlays,
   insertVideos,
@@ -14,7 +13,7 @@ function UnifiedPipelineForm({
   onProcessComplete  ,videoDuration,setMainVideo,setFile,  
   setMainVideoSource,   
   setBlobUrl,   
-  setVideoSrc, onClearTimeline
+  setVideoSrc, onClearTimeline,audioTracks = [], 
 }) {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -118,16 +117,17 @@ function UnifiedPipelineForm({
       hasVideoOverlays: videoOverlays?.length || 0,
       hasImageOverlays: imageOverlays?.length || 0,
       audioMode: audioMode || 'keep',
-      hasAudioFile: !!addedAudioFile,
-      audioFileName: addedAudioFile?.name || 'none',
+      hasAudioFile: audioTracks.length > 0,
+      audioFileName: audioTracks.map(t => t.name).join(', ') || 'none',
+      audioTrackCount: audioTracks.length,
       audioTrackActions: audioTrack?.actions?.length || 0,
       hasInsertVideos: insertVideos?.length || 0,
       //splitScreenEnabled: splitScreenConfig?.enabled || false
     });
-  }, [mainVideo, mainVideoPath, clips, tracks, videoOverlays, imageOverlays, audioMode, addedAudioFile, insertVideos, splitScreenConfig]);
+  }, [mainVideo, mainVideoPath, clips, tracks, videoOverlays, imageOverlays, audioMode, audioTracks, insertVideos, splitScreenConfig]);
 
   // ✅ CORRECTED: Build payload from VideoEditor state
-  const buildPayload = (tasksToUse) => {
+  const buildPayload = (tasksToUse, uploadedAudioClips = []) => {
   console.log('🔍 buildPayload received:', tasksToUse);
   
   // Safety check - use empty object if undefined
@@ -270,16 +270,17 @@ function UnifiedPipelineForm({
   }
 
   // Audio control
-  if (tasks.audio_control && audioMode !== 'keep') {
-    console.log('✅ Adding audio_control task');
-    payload.audio_control = {
-      enabled: true,
-      mode: audioMode,
-      ...(audioMode === 'replace' && uploadedAudioFilename && {
-        audio_filename: uploadedAudioFilename
-      })
-    };
-  }
+ if (tasks.audio_control && audioMode !== 'keep') {
+  const isActiveMode = audioMode === 'replace' || audioMode === 'mix';
+  payload.audio_control = {
+    enabled: true,
+    mode: audioMode,
+    ...(isActiveMode && uploadedAudioClips.length > 0 && {
+      audio_clips: uploadedAudioClips,
+    }),
+  };
+}
+ 
 
   // Split screen
   // if (tasks.split_screen && splitScreenConfig?.enabled) {
@@ -293,6 +294,8 @@ function UnifiedPipelineForm({
   console.log('📤 Final payload tasks:', payload.tasks);
   return payload;
 };
+
+
 
   const getActiveTasks = () => {
     const tasks = [];
@@ -426,39 +429,36 @@ function UnifiedPipelineForm({
   setBackendError(null);
   setResult(null);
 
+   
+
   try {
     // ✅ Upload audio file if needed (BEFORE building payload)
-     let currentAudioFilename = null;
-    if (updatedSelectedTasks.audio_control && 
-        audioMode === 'replace' && 
-        addedAudioFile) {
-      
-      console.log('📤 Uploading audio file:', addedAudioFile.name);
-      
-      const formData = new FormData();
-      formData.append('file', addedAudioFile);
-      
-      const audioResponse = await fetch(`${config.API_URL}/upload/local`, {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!audioResponse.ok) {
-        throw new Error('Audio upload failed');
-      }
-      
-      const audioData = await audioResponse.json();
-      currentAudioFilename = audioData.filename;
-      setUploadedAudioFilename(audioData.filename);
-      
-      console.log('✅ Audio uploaded:', audioData.filename);
-      
-      // Wait for state to update
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    let uploadedAudioClips = [];
+if (
+  updatedSelectedTasks.audio_control &&
+  (audioMode === 'replace' || audioMode === 'mix') &&
+  audioTracks?.length > 0
+) {
+  for (const track of audioTracks) {
+    const formData = new FormData();
+    formData.append('file', track.file);
+    const res = await fetch(`${config.API_URL}/upload/local`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Audio upload failed: ${track.name}`);
+    const data = await res.json();
+    uploadedAudioClips.push({
+      audio_filename: data.filename,
+      clip_start: track.clipStart ?? 0,
+      clip_end: track.clipEnd ?? null,
+    });
+  }
+}
+
     console.log('📞 Calling buildPayload with:', updatedSelectedTasks);
     // ✅ Build payload with updated tasks
-    const payload = buildPayload(updatedSelectedTasks);
+    const payload = buildPayload(updatedSelectedTasks, uploadedAudioClips);
     setLastPayload(payload);
     
     console.log('📤 FULL PAYLOAD BEING SENT:');
@@ -585,6 +585,7 @@ function UnifiedPipelineForm({
     alert(`Download failed: ${error.message}`);
   }
 };
+ 
 
   return (
     <div style={{

@@ -11,7 +11,7 @@
   import UnifiedPipelineForm from "../components/UnifiedPipelineForm";
   import { debugLog, debugGroup, debugGroupEnd } from "../utils/debuggerLog";
   import {useVirtualFrames} from "../hooks/useVirtualFrames";
-  import  config from "../config";
+  import  config from "../config"; 
 
 
   function VideoEditor() {
@@ -49,8 +49,7 @@
     const [isUserScrolling, setIsUserScrolling] = useState(false);
     const [pendingAudioTrack, setPendingAudioTrack] = useState(null);
     const [pendingVideoTrack, setPendingVideoTrack] = useState(null);
-    const [audioMode, setAudioMode] = useState("keep");
-    const [addedAudioSrc, setAddedAudioSrc] = useState(null);
+    const [audioMode, setAudioMode] = useState("keep"); 
     const [isProcessingAudio, setIsProcessingAudio] = useState(false);    
     const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
     const [razorMode, setRazorMode] = useState(false);
@@ -67,7 +66,8 @@
     const [mainVideo, setMainVideo] = useState(null);
     const [timelineKey, setTimelineKey] = useState(0);
     const [pendingCut, setPendingCut] = useState(null);
-  
+    const [audioTracks, setAudioTracks] = useState([]);
+   
     // Refs
     const audioInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -76,8 +76,7 @@
     const scrollTimeoutRef = useRef(null);
     const lastScrollLeft = useRef(0);
     const addedAudioRef = useRef();
-    const audioEngineRef = useRef(null);
-    const addedAudioFileRef = useRef(null);
+    const audioEngineRef = useRef(null); 
     const secondVideoRef = useRef(null);
     const isUploadingSecondVideoRef = useRef(false);
     const videoOverlayInputRef = useRef(null);
@@ -876,79 +875,61 @@ const handleOnVideoUpload = async (file) => {
 
     // ✅ Initialize audio engine ONLY when audio is added (ONE TIME) 
   useEffect(() => {
-    if (!addedAudioSrc || !videoRef.current || !addedAudioRef.current) {
-      console.log("[AudioEngine] Waiting for audio source...");
-      return;
-    }
+  if (audioTracks.length === 0 || !videoRef.current) return;
 
-    const audio = addedAudioRef.current;
-    const video = videoRef.current;
+  // Use only the first audio track for live preview
+  const firstTrack = audioTracks[0];
+  if (!addedAudioRef.current) return;
 
-    const initEngine = () => {
-      try {
-        console.log("[AudioEngine] Creating engine...");
-        
-        // ✅ CRITICAL: Pause both elements first
-        const wasPlaying = !video.paused;
-        const videoTime = video.currentTime;
-        
-        if (wasPlaying) {
-          video.pause();
-        }
-        
-        // ✅ Sync audio to video time BEFORE creating engine
-        audio.currentTime = videoTime;
-        console.log("  → Synced to time:", videoTime.toFixed(2));
-        
-        // ✅ Wait a frame for currentTime to settle
-        requestAnimationFrame(() => {
-          audioEngineRef.current = new AudioModeEngine(video, audio);
-          audioEngineRef.current.sync();
+  const audio = addedAudioRef.current;
+  const video = videoRef.current;
+
+  // Update audio src if changed
+  if (audio.src !== firstTrack.src) {
+    audio.src = firstTrack.src;
+    audio.currentTime = video.currentTime;
+  }
+
+  const initEngine = () => {
+    try {
+      const wasPlaying = !video.paused;
+      const videoTime = video.currentTime;
+      if (wasPlaying) video.pause();
+      audio.currentTime = videoTime;
+
+      requestAnimationFrame(() => {
+        if (audioEngineRef.current) {
+          console.log("[AudioEngine] Engine exists, just updating mode");
           audioEngineRef.current.setMode(audioMode);
-          
-          console.log("[AudioEngine] ✅ Engine initialized");
-          
-          // ✅ Resume playback if it was playing
           if (wasPlaying) {
-            setTimeout(() => {
-              video.play().catch(e => console.warn("Resume failed:", e));
-            }, 100);
+            setTimeout(() => video.play().catch(() => {}), 100);
           }
-        });
-        
-      } catch (error) {
-        console.error("[AudioEngine] Failed to initialize:", error);
-        if (error.message.includes("already connected")) {
-          alert("Audio engine error. Please refresh the page.");
+          return;
         }
-      }
-    };
-
-    // Wait for audio to be ready
-    if (audio.readyState >= 2) { // HAVE_CURRENT_DATA or better
-      initEngine();
-    } else {
-      const onReady = () => {
-        console.log("[AudioEngine] Audio element ready");
-        initEngine();
-      };
-      audio.addEventListener('loadeddata', onReady, { once: true });
-      
-      return () => {
-        audio.removeEventListener('loadeddata', onReady);
-      };
+        audioEngineRef.current = new AudioModeEngine(video, audio);
+        audioEngineRef.current.sync();
+        audioEngineRef.current.setMode(audioMode);
+        if (wasPlaying) {
+          setTimeout(() => video.play().catch(() => {}), 100);
+        }
+      });
+    } catch (error) {
+      console.error("[AudioEngine] Failed to initialize:", error);
     }
+  };
 
-    return () => {
-      console.log("[AudioEngine] Cleaning up engine");
-      if (audioEngineRef.current) {
-        if (addedAudioRef.current) {
-          addedAudioRef.current.pause();
-        }
-      }
-      audioEngineRef.current = null;
-    };
-  }, [addedAudioSrc]);
+  if (audio.readyState >= 2) {
+    initEngine();
+  } else {
+    audio.addEventListener('loadeddata', initEngine, { once: true });
+    return () => audio.removeEventListener('loadeddata', initEngine);
+  }
+
+  return () => {
+    if (addedAudioRef.current) addedAudioRef.current.pause();
+    //audioEngineRef.current = null;
+  };
+}, [audioTracks]);
 
   // ✅ Apply mode changes SEPARATELY
   useEffect(() => {
@@ -987,7 +968,7 @@ const handleOnVideoUpload = async (file) => {
         action, 
         trackId, 
         hasEngine: !!audioEngineRef.current,
-        hasAudio: !!addedAudioSrc,
+        hasAudio: audioTracks.length > 0,
         currentMode: audioMode
       });
       
@@ -1008,34 +989,40 @@ const handleOnVideoUpload = async (file) => {
           break;
 
         case "replaceMode":
-          console.log("🔁 Setting REPLACE mode");
-          if (!addedAudioSrc) {
-            alert("⚠️ Please add an audio file first");
-            return;
-          }
-          setAudioMode(AUDIO_MODES.REPLACE);
-          break;
+      console.log("🔁 Setting REPLACE mode");
+      if (audioTracks.length === 0) {
+        alert("⚠️ Please add an audio file first");
+        return;
+      }
+      setAudioMode(AUDIO_MODES.REPLACE);
+      break;
 
-        case "mix":
-          console.log("🎚 Setting MIX mode");
-          if (!addedAudioSrc) {
-            alert("⚠️ Please add an audio file first");
-            return;
-          }
-          setAudioMode(AUDIO_MODES.MIX);
-          break;
+    case "mix":
+      console.log("🎚 Setting MIX mode");
+      if (audioTracks.length === 0) {
+        alert("⚠️ Please add an audio file first");
+        return;
+      }
+      setAudioMode(AUDIO_MODES.MIX);
+      break;
 
-        case "split":
-          if (!addedAudioSrc) {
-            alert("⚠️ Please add an audio file first");
-            return;
-          }
-          splitAudioAtPlayhead(trackId);
-          break;
+    case "split":
+      if (audioTracks.length === 0) {
+        alert("⚠️ Please add an audio file first");
+        return;
+      }
+      splitAudioAtPlayhead(trackId);
+      break;
 
         case "delete":
-          removeAudioTrack(trackId);
-          break;
+        setAudioTracks([]);           // ← was: setAddedAudioSrc(null)
+        setAudioMode("keep");
+        setTracks(prev =>
+          prev.map(track =>
+            track.id === trackId ? { ...track, actions: [] } : track
+          )
+        );
+        break;
 
         default:
           console.warn("Unknown audio action:", action);
@@ -1043,56 +1030,67 @@ const handleOnVideoUpload = async (file) => {
     };
   
   // ✅ ADD AUDIO FILE
-    const handleAddAudio = (file, trackId) => {
-    console.log("[handleAddAudio] Adding audio:", file.name);
-    
-    const url = URL.createObjectURL(file);
-    
-    const audio = new Audio(url);
-    audio.onloadedmetadata = () => {
-      console.log("[handleAddAudio] Metadata loaded");
-      console.log("  → Duration:", audio.duration);
-      
-      // ✅ CRITICAL: Set source FIRST, wait for React to render
-      setAddedAudioSrc(url);
+   const handleAddAudio = (file, trackId) => {
+  const url = URL.createObjectURL(file);
+  const audio = new Audio(url);
 
-      addedAudioFileRef.current = file;
-
-      // ✅ Add to tracks
-      setTracks((prev) =>
-        prev.map((track) =>
-          track.id === trackId
-            ? {
-                ...track,
-                actions: [
-                  {
-                    id: Date.now().toString(),
-                    start: 0,
-                    end: audio.duration,
-                    src: url,
-                    volume: 1,
-                  },
-                ],
-              }
-            : track
-        )
-      );
-      
-      
-
-      // ✅ Switch to MIX mode after engine initializes
-      setTimeout(() => {
-        console.log("[handleAddAudio] Switching to MIX mode");
-        setAudioMode(AUDIO_MODES.MIX);
-      }, 500); // Increased delay to ensure engine is ready
+  audio.addEventListener("loadedmetadata", () => {
+    const dur = audio.duration;
+    const newTrack = {
+      id: Date.now().toString(),
+      src: url,
+      file,
+      name: file.name,
+      clipStart: 0,
+      clipEnd: dur,
+      duration: dur,
     };
-    
-    audio.onerror = (e) => {
-      console.error("[handleAddAudio] Failed to load:", e);
-      alert("Failed to load audio file");
-    };
-  };
+
+    setAudioTracks(prev => [...prev, newTrack]);
+
+    // Add clip to timeline audio track row
+    setTracks(prev =>
+      prev.map(track =>
+        track.id === trackId
+          ? {
+              ...track,
+              actions: [
+                ...track.actions,
+                { id: newTrack.id, start: 0, end: dur, name: file.name },
+              ],
+            }
+          : track
+      )
+    );
+
+    // Auto switch to mix if not already replace/mix
+    if (audioMode === "keep" || audioMode === "mute") {
+      setAudioMode(AUDIO_MODES.MIX);
+    }
+  });
+};
   
+    const handleAudioTrimChange = useCallback((audioId, start, end) => {
+  setAudioTracks(prev =>
+    prev.map(t => t.id === audioId ? { ...t, clipStart: start, clipEnd: end } : t)
+  );
+}, []);
+
+const removeOneAudioTrack = useCallback((audioId) => {
+  setAudioTracks(prev => {
+    const updated = prev.filter(t => t.id !== audioId);
+    if (updated.length === 0) setAudioMode("keep");
+    return updated;
+  });
+  // Also remove from timeline track actions
+  setTracks(prev =>
+    prev.map(track =>
+      track.type === "audio"
+        ? { ...track, actions: track.actions.filter(a => a.id !== audioId) }
+        : track
+    )
+  );
+}, []);
 
   //------------------- EXPORT AUDIO MODE -------------------
   const handleExportAudioMode = async () => {
@@ -1193,8 +1191,8 @@ const handleOnVideoUpload = async (file) => {
         URL.revokeObjectURL(addedAudioSrc);
       }
       
-      addedAudioFileRef.current = null;
-      setAddedAudioSrc(null);
+      
+      setAudioTracks([])
       setAudioMode(AUDIO_MODES.KEEP);
       
       // Reset engine
@@ -1991,7 +1989,7 @@ const handleAddImageOverlay = async (file, startTime = 0) => {
       src: url,
       serverFilename: data.filename,
       start: startTime,
-      end: startTime + 5, // Default 5 second display
+      end: videoDuration, // startTime + 5, // Default 5 second display
       position: { 
         x: 20, // Top left corner
         y: 20 
@@ -2215,11 +2213,10 @@ const handleUnifiedProcessComplete = (result) => {
     
     // Reset audio
     setAudioMode('keep');
-    if (addedAudioSrc) {
-      URL.revokeObjectURL(addedAudioSrc);
-    }
-    setAddedAudioSrc(null);
-    addedAudioFileRef.current = null;
+    audioTracks.forEach(track => {
+      if (track.src) URL.revokeObjectURL(track.src);
+    });
+    setAudioTracks([]); 
   }
 };
 
@@ -2237,12 +2234,14 @@ const handleClearTimeline = () => {
   setRazorMode(false);
   
   // Clear audio
-  if (addedAudioSrc && addedAudioSrc.startsWith('blob:')) {
-    URL.revokeObjectURL(addedAudioSrc);
+  audioTracks.forEach(track => {
+  if (track.src?.startsWith('blob:')) {
+    URL.revokeObjectURL(track.src);
   }
-  setAddedAudioSrc(null);
+  });
+  setAudioTracks([])
   setAudioMode('keep');
-  addedAudioFileRef.current = null;
+  
   audioEngineRef.current = null;
   
   setTracks(prev => prev.map(track => {
@@ -2410,16 +2409,16 @@ const handleClearTimeline = () => {
             </div>
           )}
         
-          {addedAudioSrc && (
-            <audio
-              ref={addedAudioRef}
-              src={addedAudioSrc}
-              style={{ display: "none" }}
-              preload="auto"
-              onError={(e) => console.error("[Audio Element] Load error:", e)}
-              onLoadedData={() => console.log("[Audio Element] ✅ Loaded")}
-            />
-          )}
+        {audioTracks.length > 0 && (
+        <audio
+          ref={addedAudioRef}
+          src={audioTracks[0].src}
+          style={{ display: "none" }}
+          preload="auto"
+          onError={(e) => console.error("[Audio Element] Load error:", e)}
+          onLoadedData={() => console.log("[Audio Element] ✅ Loaded")}
+        />
+      )}
         </div>
       </div>
     ) : (
@@ -2611,6 +2610,9 @@ const handleClearTimeline = () => {
             failedFrames={failedFrames}
             pendingCut={pendingCut}
             onDeleteClip={handleDeleteClip}
+            audioTracks={audioTracks}
+            onAudioTrimChange={handleAudioTrimChange}
+            onRemoveAudio={removeOneAudioTrack} 
           />
         </div>
      </div>  
@@ -2689,7 +2691,7 @@ const handleClearTimeline = () => {
         )} */}
 
          <h3>🧩 Merge Videos</h3>
-      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} /> 
+      <MergePanel videos={mergedVideos} onMerged={loadVideosForMerge} />  
 
   <div style={{ padding: 20 }}>
            {/* ... all your existing UI components ... */}
@@ -2707,14 +2709,15 @@ const handleClearTimeline = () => {
               setMainVideoSource={setMainVideoSource}  // ✅ Add this
               setBlobUrl={setBlobUrl}  // ✅ Add this
               setVideoSrc={setVideoSrc}
-              onClearTimeline={handleClearTimeline}          
+              onClearTimeline={handleClearTimeline}   
+              audioTracks={audioTracks}
              // Timeline data
              clips={clips}
              tracks={tracks}
              
              // Audio data
              audioMode={audioMode}
-             addedAudioFile={addedAudioFileRef.current}
+              
              
              // Overlays
              videoOverlays={videoOverlays}
@@ -3267,8 +3270,52 @@ const handleClearTimeline = () => {
                 e.target.value = "";
               }}
             />
-          
-            
+        {imageOverlays.map(overlay => (
+  <div key={overlay.id} style={{ padding: 10, marginBottom: 8, background: "#1f2937", borderRadius: 6 }}>
+    <div style={{ color: "#9ca3af", fontSize: 12, marginBottom: 6 }}>
+      🖼️ {overlay.serverFilename}
+    </div>
+    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div style={{ flex: 1 }}>
+        <label style={{ fontSize: 11, color: "#888" }}>Start (s)</label>
+        <input
+          type="number"
+          min={0}
+          max={videoDuration}
+          step={0.1}
+          value={overlay.start}
+          onChange={e => handleUpdateImageOverlay(overlay.id, {  // ← FIXED
+            start: Number(e.target.value)
+          })}
+          style={{ width: "100%", padding: "4px 6px", borderRadius: 4,
+            background: "#1a1a2e", border: "1px solid #2a2a3e", color: "#eee" }}
+        />
+      </div>
+      <div style={{ flex: 1 }}>
+        <label style={{ fontSize: 11, color: "#888" }}>End (s)</label>
+        <input
+          type="number"
+          min={0}
+          max={videoDuration}
+          step={0.1}
+          value={overlay.end}
+          onChange={e => handleUpdateImageOverlay(overlay.id, {  // ← FIXED
+            end: Number(e.target.value)
+          })}
+          style={{ width: "100%", padding: "4px 6px", borderRadius: 4,
+            background: "#1a1a2e", border: "1px solid #2a2a3e", color: "#eee" }}
+        />
+      </div>
+      <button
+        onClick={() => handleDeleteImageOverlay(overlay.id)}
+        style={{ padding: "4px 10px", background: "#ef4444", color: "white",
+          border: "none", borderRadius: 4, cursor: "pointer", alignSelf: "flex-end" }}
+      >
+        🗑️
+      </button>
+    </div>
+  </div>
+))}     
       <hr /> 
     </div>  
   );

@@ -118,7 +118,7 @@ const VideoOverlayKonva = ({
         {imageOverlays
           .filter(overlay => {
             const start = overlay.start ?? 0;
-            const end = overlay.end ?? start + 5;
+            const end = overlay.end ?? videoDuration?? start + 5;
             const isVisible = currentTime >= start && currentTime <= end;
             
             // ✅ DEBUG: Log each image overlay

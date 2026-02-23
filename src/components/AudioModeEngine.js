@@ -4,12 +4,18 @@ export const AUDIO_MODES = {
   REPLACE: "replace",
   MIX: "mix",
 };
-
+const connectedElements = new WeakSet();
 export class AudioModeEngine {
   constructor(videoEl, addedAudioEl) {
     if (!videoEl || !addedAudioEl) {
       throw new Error("AudioModeEngine: Missing video or audio element");
     }
+    if (connectedElements.has(videoEl) || connectedElements.has(addedAudioEl)) {
+      throw new Error("already connected");
+    }
+
+    connectedElements.add(videoEl);
+    connectedElements.add(addedAudioEl);
 
     console.log("[AudioModeEngine] Constructor called");
     console.log("  → Video src:", videoEl.src?.substring(0, 50));

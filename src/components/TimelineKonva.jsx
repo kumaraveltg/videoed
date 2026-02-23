@@ -3,6 +3,7 @@ import React, { useRef, useState, useEffect,memo } from "react";
 import { Stage, Layer, Rect, Group, Line, Circle, Text } from "react-konva";
 import { Image as KonvaImage } from "react-konva";
 import TimelineRuler from "./TimelineRuler";
+import InlineAudioTrimmer from "./InlineAudioTrimmer";
 
 const TimelineKonva = ({
   tracks = [],
@@ -22,7 +23,10 @@ const TimelineKonva = ({
   onSecondVideoTrackAction,
   onAddVideoOverlay,        
   onDeleteVideoOverlay,  pendingCut = null,onDeleteClip,
-  handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest,frameCache,loadingFrames,failedFrames
+  handleAddInsertVideo,onDeleteImageOverlay,onAddImageRequest,frameCache,loadingFrames,failedFrames,
+   audioTracks = [], 
+  onRemoveAudio,
+  onAudioTrimChange, audioMode = "keep",
 }) => {
   const stageRef = useRef();
   const PIXELS_PER_SECOND = 10;
@@ -346,7 +350,7 @@ Frame.displayName = 'Frame';
       height={50}
       onTimeChange={onTimeChange}
     />
-
+    
     {/* Main timeline */}
     <div style={{ display: "flex", borderTop: "1px solid #555" }}>
       {/* Add buttons */}
@@ -613,7 +617,7 @@ Frame.displayName = 'Frame';
                         })}
                       </Group>
                       </>
-                    )}
+                    )} 
                       </Group>
                     );
                   })}
@@ -681,8 +685,23 @@ Frame.displayName = 'Frame';
             )}
           </Layer>
         </Stage>
+        
       </div>         
     </div>
+    {audioTracks.length > 0 && (
+  <div style={{ display: "flex" }}>
+    <div style={{ width: 37, flexShrink: 0, background: "#1a1a1a", borderRight: "1px solid #555" }} />
+    <div style={{ flex: 1 }}>
+      <InlineAudioTrimmer
+        audioMode={audioMode}
+        audioTracks={audioTracks}
+        videoDuration={videoDuration}
+        onTrimChange={onAudioTrimChange}
+        onRemoveAudio={onRemoveAudio}
+      />
+    </div>
+  </div>
+)}
     
     {/* Context Menu */}
     // Update the context menu rendering in TimelineKonva.jsx
